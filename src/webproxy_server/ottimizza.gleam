@@ -26,21 +26,16 @@ pub fn authenticate(req: Request(body)) -> Response(ResponseData) {
   case request.get_header(req, "authorization") {
     Error(Nil) -> web.unauthorized()
     Ok(auth_token) -> {
-      echo "ENTREI"
       let assert Ok(url) = envoy.get("OAUTH_BASE_URL")
       let url = url <> "/oauth/userinfo"
-      echo url
       let assert Ok(req) = request.to(url)
       let req =
         request.prepend_header(req, "accept", "application/json")
         |> request.prepend_header("authorization", auth_token)
         |> request.set_method(http.Get)
 
-      echo req
-
       case httpc.send(req) {
         Ok(resp) if resp.status == 200 -> {
-          echo resp.body
           case json.parse(from: resp.body, using: user_parser()) {
             Ok(user) -> {
               response.new(200)
