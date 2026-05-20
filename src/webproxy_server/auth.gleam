@@ -1,7 +1,5 @@
 import database
 import envoy
-import gleam/bit_array
-import gleam/crypto
 import gleam/dynamic/decode
 import gleam/erlang/atom
 import gleam/http/request
@@ -35,13 +33,9 @@ pub fn get_user_by_auth_token(
   cache: database.Table(User),
   token: String,
 ) -> Result(User, Nil) {
-  let hashed_bit_array =
-    bit_array.from_string(token) |> crypto.hash(crypto.Sha256, _)
-  use hashed_token <- result.try(bit_array.to_string(hashed_bit_array))
-
   let query_result = {
     use ref <- database.transaction(cache)
-    database.find(ref, hashed_token)
+    database.find(ref, token)
   }
   use _ <- result.try_recover(query_result)
 
@@ -55,7 +49,7 @@ pub fn get_user_by_auth_token(
       ))
       let _query = {
         use ref <- database.transaction(cache)
-        database.upsert(ref, hashed_token, user)
+        database.upsert(ref, token, user)
       }
       Ok(user)
     }

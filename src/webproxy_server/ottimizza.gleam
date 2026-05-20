@@ -1,9 +1,9 @@
 import envoy
 import gleam/dynamic/decode
+import gleam/http
 import gleam/http/request.{type Request}
 import gleam/http/response.{type Response}
 import gleam/httpc
-import gleam/http
 import gleam/int
 import gleam/json
 import mist.{type ResponseData}
@@ -12,11 +12,15 @@ import webproxy_server/web
 fn user_parser() {
   use num_id <- decode.subfield(["record", "id"], decode.int)
   use display_name <- decode.subfield(["record", "username"], decode.string)
-  use num_org_id <- decode.subfield(["record", "organization", "id"], decode.int)
+  use num_org_id <- decode.subfield(
+    ["record", "organization", "id"],
+    decode.int,
+  )
   decode.success(
     json.object([
       #("id", json.string(int.to_string(num_id))),
       #("displayName", json.string(display_name)),
+      #("scopes", json.array(["*"], of: json.string)),
       #("organization_id", json.string(int.to_string(num_org_id))),
     ]),
   )
