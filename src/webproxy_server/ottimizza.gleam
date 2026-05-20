@@ -9,9 +9,9 @@ import mist.{type ResponseData}
 import webproxy_server/web
 
 fn user_parser() {
-  use num_id <- decode.field("id", decode.int)
-  use display_name <- decode.field("username", decode.string)
-  use num_org_id <- decode.subfield(["organization", "id"], decode.int)
+  use num_id <- decode.subfield(["record", "id"], decode.int)
+  use display_name <- decode.subfield(["record", "username"], decode.string)
+  use num_org_id <- decode.subfield(["record", "organization", "id"], decode.int)
   decode.success(
     json.object([
       #("id", json.string(int.to_string(num_id))),
