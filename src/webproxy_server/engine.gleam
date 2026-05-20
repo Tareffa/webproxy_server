@@ -58,9 +58,9 @@ pub fn subscribe(
     ))
 
     io.println("User '" <> user.display_name <> "' successfully subscribed.")
+    let _ = mist.send_text_frame(connection, "subscribed")
     Ok(Authorized(user.id, cluster_id, user.scopes))
   }
-  let _ = mist.send_text_frame(connection, "subscribed")
   result.unwrap(check, Unauthorized(ip_address))
   |> mist.continue
 }
