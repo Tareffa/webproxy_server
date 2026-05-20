@@ -33,7 +33,7 @@ pub fn authenticate(req: Request(body)) -> Response(ResponseData) {
       let assert Ok(req) = request.to(url)
       let req =
         request.prepend_header(req, "accept", "application/json")
-        |> request.prepend_header("authorizatin", auth_token)
+        |> request.prepend_header("authorization", auth_token)
         |> request.set_method(http.Get)
 
       echo req
