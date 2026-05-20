@@ -3,6 +3,7 @@ import gleam/dynamic/decode
 import gleam/http/request.{type Request}
 import gleam/http/response.{type Response}
 import gleam/httpc
+import gleam/http
 import gleam/int
 import gleam/json
 import mist.{type ResponseData}
@@ -31,8 +32,11 @@ pub fn authenticate(req: Request(body)) -> Response(ResponseData) {
       echo url
       let assert Ok(req) = request.to(url)
       let req =
-        request.prepend_header(req, "Accept", "application/json")
-        |> request.prepend_header("Authorizatin", auth_token)
+        request.prepend_header(req, "accept", "application/json")
+        |> request.prepend_header("authorizatin", auth_token)
+        |> request.set_method(http.Get)
+
+      echo req
 
       case httpc.send(req) {
         Ok(resp) if resp.status == 200 -> {
