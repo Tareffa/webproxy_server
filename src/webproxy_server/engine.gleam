@@ -77,6 +77,8 @@ pub fn require(
     cluster.get_connected_peers(clusters, cluster_id, user_id)
     |> dict.values()
 
+  echo "Peers: " <> string.inspect(peers)
+
   case
     add_pending_resource_to_queue(pending_resources, user_id, resource_name)
   {
@@ -89,7 +91,11 @@ pub fn require(
         ])
         |> json.to_string()
       let petition = "/require " <> petition
-      list.each(peers, fn(peer) { mist.send_text_frame(peer, petition) })
+      echo "Petition: " <> petition
+      list.each(peers, fn(peer) { 
+        let a = mist.send_text_frame(peer, petition) 
+        echo "Sending petition to peer: " <> string.inspect(a)
+      })
       process.spawn(fn() {
         process.sleep(400)
         remove_pending_resource_from_queue(pending_resources, resource_id)
