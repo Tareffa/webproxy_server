@@ -4,6 +4,7 @@ import gleam/crypto
 import gleam/dict.{type Dict}
 import gleam/erlang/atom
 import gleam/result
+import gleam/string
 import mist
 import webproxy_server/auth
 
@@ -44,6 +45,7 @@ pub fn get_connected_peers(
     use ref <- database.transaction(table)
     database.find(ref, id)
   }
+  echo "Connected peers query result: " <> string.inspect(query)
   result.unwrap(query, dict.new())
   |> dict.filter(fn(key, _) { key != user_id })
 }
