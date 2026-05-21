@@ -31,7 +31,7 @@ pub fn join_cluster(
     database.find(ref, cluster_id)
     |> result.unwrap(dict.new())
     |> dict.insert(user.id, connection)
-    |> database.upsert(ref, user.id, _)
+    |> database.upsert(ref, cluster_id, _)
   }
   echo "Join cluster query result: " <> string.inspect(query)
   Ok(cluster_id)
