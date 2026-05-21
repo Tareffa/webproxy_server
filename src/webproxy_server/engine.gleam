@@ -105,7 +105,7 @@ pub fn require(
           #("resourceName", json.string(resource_name)),
         ])
         |> json.to_string()
-      let petition = "/require " <> petition
+      let petition = "/r " <> petition
       echo "Petition: " <> petition
       list.each(peers, fn(peer) {
         process.send(peer, ws_command.SendText(petition))
