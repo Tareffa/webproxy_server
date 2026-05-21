@@ -1,7 +1,8 @@
 import database
+import gleam/erlang/process
 import gleam/http/request
 import gleam/http/response
-import gleam/option
+import gleam/option.{Some}
 import mist
 import webproxy_server/auth
 import webproxy_server/cluster
@@ -10,6 +11,7 @@ import webproxy_server/engine.{
 }
 import webproxy_server/ottimizza
 import webproxy_server/web
+import webproxy_server/ws_command
 
 pub type Database {
   Database(
@@ -30,14 +32,23 @@ pub fn handle_request(
       mist.websocket(
         request:,
         on_init: fn(_conn) {
+          let outbound = process.new_subject()
+          let selector =
+            process.new_selector()
+            |> process.select(for: outbound)
+
           let state = case mist.get_connection_info(request.body) {
-            Ok(info) ->
-              engine.Unauthorized(mist.ip_address_to_string(info.ip_address))
+            Ok(info) -> {
+              engine.Unauthorized(
+                mist.ip_address_to_string(info.ip_address),
+                outbound,
+              )
+            }
             Error(_) -> engine.Unreacheable
           }
-          #(state, option.None)
+          #(state, Some(selector))
         },
-        on_close: fn(_state) { Nil },
+        on_close: fn(state) { engine.on_close(db.clusters, state) },
         handler: fn(state, message, conn) {
           handle_ws_message(state, message, conn, db)
         },
@@ -48,7 +59,7 @@ pub fn handle_request(
 
 fn handle_ws_message(
   state: WsState,
-  message: mist.WebsocketMessage(b),
+  message: mist.WebsocketMessage(ws_command.WsCommand),
   conn: mist.WebsocketConnection,
   db: Database,
 ) {
@@ -56,13 +67,20 @@ fn handle_ws_message(
     _, Unreacheable -> mist.stop()
     mist.Text("ping"), _ -> engine.ping(conn, state)
 
-    mist.Text("/s " <> auth_token), Unauthorized(address) ->
-      engine.subscribe(db.users, db.clusters, address, auth_token, conn)
+    mist.Text("/s " <> auth_token), Unauthorized(address, outbound) ->
+      engine.subscribe(
+        db.users,
+        db.clusters,
+        address,
+        outbound,
+        auth_token,
+        conn,
+      )
 
-    _, Unauthorized(_) -> mist.continue(state)
+    _, Unauthorized(_, _) -> mist.continue(state)
 
     mist.Text("/r " <> resource_name),
-      Authorized(user_id:, scopes:, cluster_id:)
+      Authorized(user_id:, scopes:, cluster_id:, outbound:)
     ->
       engine.require(
         db.clusters,
@@ -70,18 +88,27 @@ fn handle_ws_message(
         cluster_id,
         user_id,
         scopes,
+        outbound,
         resource_name,
       )
 
-    mist.Text("/p " <> data), Authorized(user_id:, scopes:, cluster_id:) ->
+    mist.Text("/p " <> data),
+      Authorized(user_id:, scopes:, cluster_id:, outbound:)
+    ->
       engine.provide(
         db.clusters,
         db.pending_resources,
         cluster_id,
         user_id,
         scopes,
+        outbound,
         data,
       )
+
+    mist.Custom(ws_command.SendText(text)), _ -> {
+      let _ = mist.send_text_frame(conn, text)
+      mist.continue(state)
+    }
 
     mist.Closed, _ | mist.Shutdown, _ -> mist.stop()
 

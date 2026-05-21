@@ -1,7 +1,7 @@
 import database
 import gleam/dict
 import gleam/erlang/atom
-import gleam/erlang/process
+import gleam/erlang/process.{type Subject}
 import gleam/io
 import gleam/json
 import gleam/list
@@ -10,6 +10,7 @@ import gleam/string
 import mist
 import webproxy_server/auth
 import webproxy_server/cluster
+import webproxy_server/ws_command
 
 pub opaque type PendingResource {
   PendingResource(user_id: String, resource_name: String)
@@ -31,8 +32,13 @@ fn add_pending_resource_to_queue(
 
 pub type WsState {
   Unreacheable
-  Unauthorized(ip_address: String)
-  Authorized(user_id: String, cluster_id: String, scopes: List(String))
+  Unauthorized(ip_address: String, outbound: Subject(ws_command.WsCommand))
+  Authorized(
+    user_id: String,
+    cluster_id: String,
+    scopes: List(String),
+    outbound: Subject(ws_command.WsCommand),
+  )
 }
 
 pub fn ping(conn: mist.WebsocketConnection, state: WsState) {
@@ -44,6 +50,7 @@ pub fn subscribe(
   users: database.Table(auth.User),
   clusters: database.Table(cluster.Cluster),
   ip_address: String,
+  outbound: Subject(ws_command.WsCommand),
   auth_token: String,
   connection: mist.WebsocketConnection,
 ) -> mist.Next(WsState, a) {
@@ -54,14 +61,21 @@ pub fn subscribe(
       clusters,
       user,
       ip_address,
-      connection,
+      outbound,
     ))
 
-    io.println("User '" <> user.display_name <> "' successfully subscribed. With IP address " <> ip_address <> ". ClusterID: " <> cluster_id)
+    io.println(
+      "User '"
+      <> user.display_name
+      <> "' successfully subscribed. With IP address "
+      <> ip_address
+      <> ". ClusterID: "
+      <> cluster_id,
+    )
     let _ = mist.send_text_frame(connection, "subscribed")
-    Ok(Authorized(user.id, cluster_id, user.scopes))
+    Ok(Authorized(user.id, cluster_id, user.scopes, outbound))
   }
-  result.unwrap(check, Unauthorized(ip_address))
+  result.unwrap(check, Unauthorized(ip_address, outbound))
   |> mist.continue
 }
 
@@ -71,6 +85,7 @@ pub fn require(
   cluster_id: String,
   user_id: String,
   scopes: List(String),
+  outbound: Subject(ws_command.WsCommand),
   resource_name: String,
 ) {
   let peers =
@@ -92,9 +107,8 @@ pub fn require(
         |> json.to_string()
       let petition = "/require " <> petition
       echo "Petition: " <> petition
-      list.each(peers, fn(peer) { 
-        let a = mist.send_text_frame(peer, petition) 
-        echo "Sending petition to peer: " <> string.inspect(a)
+      list.each(peers, fn(peer) {
+        process.send(peer, ws_command.SendText(petition))
       })
       process.spawn(fn() {
         process.sleep(400)
@@ -104,10 +118,10 @@ pub fn require(
     }
     Error(_) -> {
       io.println_error("Unable to add resource to queue")
-    } 
+    }
   }
 
-  mist.continue(Authorized(user_id:, scopes:, cluster_id:))
+  mist.continue(Authorized(user_id:, scopes:, cluster_id:, outbound:))
 }
 
 fn remove_pending_resource_from_queue(
@@ -124,6 +138,7 @@ pub fn provide(
   cluster_id: String,
   user_id: String,
   scopes: List(String),
+  outbound: Subject(ws_command.WsCommand),
   data: String,
 ) -> mist.Next(WsState, a) {
   case string.split_once(data, " ") {
@@ -136,15 +151,16 @@ pub fn provide(
             let peers =
               cluster.get_connected_peers(clusters, cluster_id, user_id)
             case dict.get(peers, pending_resource.user_id) {
-              Ok(conn) -> {
-                let _ =
-                  mist.send_text_frame(
-                    conn,
+              Ok(peer) -> {
+                process.send(
+                  peer,
+                  ws_command.SendText(
                     "/provide "
-                      <> pending_resource.resource_name
-                      <> " "
-                      <> response_json,
-                  )
+                    <> pending_resource.resource_name
+                    <> " "
+                    <> response_json,
+                  ),
+                )
                 Ok(Nil)
               }
               Error(_) -> Ok(Nil)
@@ -153,8 +169,19 @@ pub fn provide(
           Error(_) -> Ok(Nil)
         }
       }
-      mist.continue(Authorized(user_id:, scopes:, cluster_id:))
+      mist.continue(Authorized(user_id:, scopes:, cluster_id:, outbound:))
     }
     _ -> mist.stop()
+  }
+}
+
+pub fn on_close(
+  clusters: database.Table(cluster.Cluster),
+  state: WsState,
+) -> Nil {
+  case state {
+    Authorized(user_id:, cluster_id:, ..) ->
+      cluster.leave_cluster(clusters, cluster_id, user_id)
+    _ -> Nil
   }
 }
