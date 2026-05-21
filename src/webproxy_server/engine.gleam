@@ -102,7 +102,9 @@ pub fn require(
       })
       Nil
     }
-    Error(_) -> Nil
+    Error(_) -> {
+      io.println_error("Unable to add resource to queue")
+    } 
   }
 
   mist.continue(Authorized(user_id:, scopes:, cluster_id:))
