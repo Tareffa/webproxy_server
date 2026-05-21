@@ -26,13 +26,14 @@ pub fn join_cluster(
     bit_array.from_string(user.organization_id <> "##" <> ip_address)
     |> crypto.hash(crypto.Sha512, _)
     |> bit_array.base64_url_encode(True)
-  let _query = {
+  let query = {
     use ref <- database.transaction(table)
     database.find(ref, cluster_id)
     |> result.unwrap(dict.new())
     |> dict.insert(user.id, connection)
     |> database.upsert(ref, user.id, _)
   }
+  echo "Join cluster query result: " <> string.inspect(query)
   Ok(cluster_id)
 }
 
