@@ -155,7 +155,7 @@ pub fn provide(
                 process.send(
                   peer,
                   ws_command.SendText(
-                    "/provide "
+                    "/p"
                     <> pending_resource.resource_name
                     <> " "
                     <> response_json,
