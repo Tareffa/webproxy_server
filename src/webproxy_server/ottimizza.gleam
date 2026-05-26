@@ -12,6 +12,16 @@ import webproxy_server/web
 fn user_parser() {
   use num_id <- decode.subfield(["record", "id"], decode.int)
   use display_name <- decode.subfield(["record", "username"], decode.string)
+  use user_type <- decode.subfield(["record", "type"], decode.int)
+  let scopes = case user_type {
+    0 -> ["*", "admin"]
+    1 -> ["*"]
+    2 -> ["*"]
+    7 -> ["*", "admin", "analyst"]
+    8 -> ["*", "admin", "analyst", "leader"]
+    9 -> ["*", "admin", "analyst", "leader", "techleader"]
+    _ -> []
+  }
   use num_org_id <- decode.subfield(
     ["record", "organization", "id"],
     decode.int,
@@ -20,7 +30,7 @@ fn user_parser() {
     json.object([
       #("id", json.string(int.to_string(num_id))),
       #("displayName", json.string(display_name)),
-      #("scopes", json.array(["*"], of: json.string)),
+      #("scopes", json.array(scopes, of: json.string)),
       #("organization_id", json.string(int.to_string(num_org_id))),
     ]),
   )
