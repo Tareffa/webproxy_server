@@ -92,8 +92,6 @@ pub fn require(
     cluster.get_connected_peers(clusters, cluster_id, user_id)
     |> dict.values()
 
-  echo "Peers: " <> string.inspect(peers)
-
   case
     add_pending_resource_to_queue(pending_resources, user_id, resource_name)
   {
@@ -106,7 +104,6 @@ pub fn require(
         ])
         |> json.to_string()
       let petition = "/r " <> petition
-      echo "Petition: " <> petition
       list.each(peers, fn(peer) {
         process.send(peer, ws_command.SendText(petition))
       })
