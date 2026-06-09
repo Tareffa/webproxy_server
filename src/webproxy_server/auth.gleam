@@ -1,5 +1,4 @@
 import database
-import envoy
 import gleam/dynamic/decode
 import gleam/erlang/atom
 import gleam/http/request
@@ -64,8 +63,5 @@ fn prepare_auth_request(token: String) {
 }
 
 fn get_authentication_url() {
-  let assert Ok("https://" <> url) = envoy.get("AUTHENTICATION_URL")
-    as "Please, inform a valid AUTHENTICATION_URL environment variable according to the documentation."
-
-  "https://" <> url
+  "http://localhost:8080/auth_relay"
 }
