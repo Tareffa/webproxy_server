@@ -7,6 +7,7 @@ import gleam/json
 import gleam/list
 import gleam/result
 import gleam/string
+import gleam/string_tree
 import mist
 import webproxy_server/auth
 import webproxy_server/cluster
@@ -53,14 +54,6 @@ pub fn subscribe(
       outbound,
     ))
 
-    io.println(
-      "User '"
-      <> user.display_name
-      <> "' successfully subscribed. With IP address "
-      <> ip_address
-      <> ". ClusterID: "
-      <> cluster_id,
-    )
     let _ = mist.send_text_frame(connection, "subscribed")
     Ok(Authorized(user.id, cluster_id, user.scopes, outbound))
   }
@@ -136,15 +129,13 @@ pub fn provide(
               cluster.get_connected_peers(clusters, cluster_id, user_id)
             case dict.get(peers, pending_resource.user_id) {
               Ok(peer) -> {
-                process.send(
-                  peer,
-                  ws.SendText(
-                    "/p "
-                    <> pending_resource.resource_name
-                    <> " "
-                    <> response_json,
-                  ),
-                )
+                string_tree.from_string("/p ")
+                |> string_tree.append(pending_resource.resource_name)
+                |> string_tree.append(" ")
+                |> string_tree.append(response_json)
+                |> string_tree.to_string()
+                |> ws.SendText
+                |> process.send(peer, _)
                 Ok(Nil)
               }
               Error(_) -> Ok(Nil)
