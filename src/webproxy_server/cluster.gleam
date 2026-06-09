@@ -5,7 +5,6 @@ import gleam/dict.{type Dict}
 import gleam/erlang/atom
 import gleam/erlang/process.{type Subject}
 import gleam/result
-import gleam/string
 import webproxy_server/auth
 import webproxy_server/ws_command
 
@@ -25,7 +24,7 @@ pub fn join_cluster(
 ) -> Result(String, Nil) {
   let cluster_id =
     bit_array.from_string(user.organization_id <> "##" <> ip_address)
-    |> crypto.hash(crypto.Sha512, _)
+    |> crypto.hash(crypto.Sha256, _)
     |> bit_array.base64_url_encode(True)
   let _query = {
     use ref <- database.transaction(table)
