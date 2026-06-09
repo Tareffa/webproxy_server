@@ -1,4 +1,3 @@
-import gleam/string_tree
 import database
 import gleam/dict
 import gleam/erlang/atom
@@ -8,6 +7,7 @@ import gleam/json
 import gleam/list
 import gleam/result
 import gleam/string
+import gleam/string_tree
 import mist
 import webproxy_server/auth
 import webproxy_server/cluster
