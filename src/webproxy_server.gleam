@@ -22,6 +22,7 @@ pub fn main() -> Nil {
   let assert Ok(_) =
     router.handle_request(_, db)
     |> mist.new
+    |> mist.with_ipv6
     |> mist.bind("0.0.0.0")
     |> mist.port(port)
     |> mist.start
