@@ -6,10 +6,10 @@ import gleam/erlang/atom
 import gleam/erlang/process.{type Subject}
 import gleam/result
 import webproxy_server/auth
-import webproxy_server/ws_command
+import webproxy_server/ws
 
 pub type Cluster =
-  Dict(String, Subject(ws_command.WsCommand))
+  Dict(String, Subject(ws.WsCommand))
 
 pub fn new_clusters_table() -> database.Table(Cluster) {
   atom.create("clusters_table")
@@ -20,11 +20,11 @@ pub fn join_cluster(
   table: database.Table(Cluster),
   user: auth.User,
   ip_address: String,
-  outbound: Subject(ws_command.WsCommand),
+  outbound: Subject(ws.WsCommand),
 ) -> Result(String, Nil) {
   let cluster_id =
     bit_array.from_string(user.organization_id <> "##" <> ip_address)
-    |> crypto.hash(crypto.Sha256, _)
+    |> crypto.hash(crypto.Sha512, _)
     |> bit_array.base64_url_encode(True)
   let _query = {
     use ref <- database.transaction(table)
@@ -61,7 +61,7 @@ pub fn get_connected_peers(
   table: database.Table(Cluster),
   id: String,
   user_id: String,
-) -> Dict(String, Subject(ws_command.WsCommand)) {
+) -> Dict(String, Subject(ws.WsCommand)) {
   let query = {
     use ref <- database.transaction(table)
     database.find(ref, id)

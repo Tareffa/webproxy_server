@@ -1,5 +1,4 @@
 import database
-import envoy
 import gleam/dynamic/decode
 import gleam/erlang/atom
 import gleam/http/request

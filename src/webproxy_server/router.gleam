@@ -6,12 +6,10 @@ import gleam/option.{Some}
 import mist
 import webproxy_server/auth
 import webproxy_server/cluster
-import webproxy_server/engine.{
-  type WsState, Authorized, Unauthorized, Unreacheable,
-}
+import webproxy_server/engine
 import webproxy_server/ottimizza
 import webproxy_server/web
-import webproxy_server/ws_command
+import webproxy_server/ws.{Authorized, Unauthorized, Unreacheable}
 
 pub type Database {
   Database(
@@ -39,12 +37,9 @@ pub fn handle_request(
 
           let state = case mist.get_connection_info(request.body) {
             Ok(info) -> {
-              engine.Unauthorized(
-                mist.ip_address_to_string(info.ip_address),
-                outbound,
-              )
+              Unauthorized(mist.ip_address_to_string(info.ip_address), outbound)
             }
-            Error(_) -> engine.Unreacheable
+            Error(_) -> Unreacheable
           }
           #(state, Some(selector))
         },
@@ -58,8 +53,8 @@ pub fn handle_request(
 }
 
 fn handle_ws_message(
-  state: WsState,
-  message: mist.WebsocketMessage(ws_command.WsCommand),
+  state: ws.WsState,
+  message: mist.WebsocketMessage(ws.WsCommand),
   conn: mist.WebsocketConnection,
   db: Database,
 ) {
@@ -105,7 +100,7 @@ fn handle_ws_message(
         data,
       )
 
-    mist.Custom(ws_command.SendText(text)), _ -> {
+    mist.Custom(ws.SendText(text)), _ -> {
       let _ = mist.send_text_frame(conn, text)
       mist.continue(state)
     }

@@ -7,10 +7,11 @@ import gleam/json
 import gleam/list
 import gleam/result
 import gleam/string
+import gleam/string_tree
 import mist
 import webproxy_server/auth
 import webproxy_server/cluster
-import webproxy_server/ws_command
+import webproxy_server/ws.{Authorized, Unauthorized}
 
 pub opaque type PendingResource {
   PendingResource(user_id: String, resource_name: String)
@@ -30,18 +31,7 @@ fn add_pending_resource_to_queue(
   database.insert(ref, PendingResource(user_id:, resource_name:))
 }
 
-pub type WsState {
-  Unreacheable
-  Unauthorized(ip_address: String, outbound: Subject(ws_command.WsCommand))
-  Authorized(
-    user_id: String,
-    cluster_id: String,
-    scopes: List(String),
-    outbound: Subject(ws_command.WsCommand),
-  )
-}
-
-pub fn ping(conn: mist.WebsocketConnection, state: WsState) {
+pub fn ping(conn: mist.WebsocketConnection, state: ws.WsState) {
   let _ = mist.send_text_frame(conn, "pong")
   mist.continue(state)
 }
@@ -50,10 +40,10 @@ pub fn subscribe(
   users: database.Table(auth.User),
   clusters: database.Table(cluster.Cluster),
   ip_address: String,
-  outbound: Subject(ws_command.WsCommand),
+  outbound: Subject(ws.WsCommand),
   auth_token: String,
   connection: mist.WebsocketConnection,
-) -> mist.Next(WsState, a) {
+) -> mist.Next(ws.WsState, a) {
   let check = {
     use user <- result.try(auth.get_user_by_auth_token(users, auth_token))
 
@@ -77,7 +67,7 @@ pub fn require(
   cluster_id: String,
   user_id: String,
   scopes: List(String),
-  outbound: Subject(ws_command.WsCommand),
+  outbound: Subject(ws.WsCommand),
   resource_name: String,
 ) {
   let peers =
@@ -96,9 +86,7 @@ pub fn require(
         ])
         |> json.to_string()
       let petition = "/r " <> petition
-      list.each(peers, fn(peer) {
-        process.send(peer, ws_command.SendText(petition))
-      })
+      list.each(peers, fn(peer) { process.send(peer, ws.SendText(petition)) })
       process.spawn(fn() {
         process.sleep(400)
         remove_pending_resource_from_queue(pending_resources, resource_id)
@@ -127,9 +115,9 @@ pub fn provide(
   cluster_id: String,
   user_id: String,
   scopes: List(String),
-  outbound: Subject(ws_command.WsCommand),
+  outbound: Subject(ws.WsCommand),
   data: String,
-) -> mist.Next(WsState, a) {
+) -> mist.Next(ws.WsState, a) {
   case string.split_once(data, " ") {
     Ok(#(resource_id, response_json)) -> {
       let _ = {
@@ -141,15 +129,13 @@ pub fn provide(
               cluster.get_connected_peers(clusters, cluster_id, user_id)
             case dict.get(peers, pending_resource.user_id) {
               Ok(peer) -> {
-                process.send(
-                  peer,
-                  ws_command.SendText(
-                    "/p "
-                    <> pending_resource.resource_name
-                    <> " "
-                    <> response_json,
-                  ),
-                )
+                string_tree.from_string("/p ")
+                |> string_tree.append(pending_resource.resource_name)
+                |> string_tree.append(" ")
+                |> string_tree.append(response_json)
+                |> string_tree.to_string()
+                |> ws.SendText
+                |> process.send(peer, _)
                 Ok(Nil)
               }
               Error(_) -> Ok(Nil)
@@ -166,7 +152,7 @@ pub fn provide(
 
 pub fn on_close(
   clusters: database.Table(cluster.Cluster),
-  state: WsState,
+  state: ws.WsState,
 ) -> Nil {
   case state {
     Authorized(user_id:, cluster_id:, ..) ->
