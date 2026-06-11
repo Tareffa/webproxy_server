@@ -1,3 +1,4 @@
+import database
 import envoy
 import gleam/erlang/process
 import gleam/int
@@ -8,6 +9,9 @@ import webproxy_server/auth
 import webproxy_server/cluster
 import webproxy_server/engine
 import webproxy_server/router
+
+@external(erlang, "webproxy_server_ffi", "delete_old_users_from_table")
+fn delete_old_users_from_table(table: database.Table(auth.User)) -> Int
 
 pub fn main() -> Nil {
   io.println("Starting server...")
@@ -28,7 +32,13 @@ pub fn main() -> Nil {
     |> mist.start
 
   io.println("Server started at port " <> int.to_string(port))
-  process.sleep_forever()
+  start_garbage_collector(db)
+}
+
+fn start_garbage_collector(db: router.Database) {
+  process.sleep(3_600_000)
+  delete_old_users_from_table(db.users)
+  start_garbage_collector(db)
 }
 
 fn get_port() -> Int {

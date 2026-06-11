@@ -74,31 +74,30 @@ fn handle_ws_message(
 
     _, Unauthorized(_, _) -> mist.continue(state)
 
-    mist.Text("/r " <> resource_name),
-      Authorized(user_id:, scopes:, cluster_id:, outbound:)
-    ->
+    mist.Text("/r " <> resource_name), Authorized(user:, cluster_id:, outbound:)
+    -> {
       engine.require(
         db.clusters,
         db.pending_resources,
         cluster_id,
-        user_id,
-        scopes,
+        user,
         outbound,
         resource_name,
       )
+    }
 
-    mist.Text("/p " <> data),
-      Authorized(user_id:, scopes:, cluster_id:, outbound:)
-    ->
+    mist.Text("/p " <> data), Authorized(user:, cluster_id:, outbound:) -> {
       engine.provide(
         db.clusters,
         db.pending_resources,
         cluster_id,
-        user_id,
-        scopes,
+        user,
         outbound,
         data,
       )
+    }
+
+    mist.Text("/upgrade"), Authorized(user:, ..) -> engine.upgrade(user, conn)
 
     mist.Custom(ws.SendText(text)), _ -> {
       let _ = mist.send_text_frame(conn, text)

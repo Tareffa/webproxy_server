@@ -9,6 +9,7 @@ const user = auth.User(
   display_name: "John Doe",
   scopes: ["read", "write"],
   organization_id: "org1",
+  created_at: 0.0,
 )
 
 const ip_address = "192.168.1.1"
@@ -46,7 +47,14 @@ pub fn get_connected_peers_test() {
   let assert Ok(cluster_id) =
     cluster.join_cluster(table, user, ip_address, outbound)
 
-  let other_user = auth.User(..user, display_name: "Penelope", id: "aabbcc")
+  let other_user =
+    auth.User(
+      scopes: ["read", "write"],
+      organization_id: "org1",
+      display_name: "Penelope",
+      id: "aabbcc",
+      created_at: 0.0,
+    )
   let assert Ok(second_cluster_id) =
     cluster.join_cluster(table, other_user, ip_address, outbound)
 
@@ -54,14 +62,26 @@ pub fn get_connected_peers_test() {
 
   let other_ip = "192.168.1.2"
   let other_network_user =
-    auth.User(..user, display_name: "Someone", id: "1010101")
+    auth.User(
+      scopes: ["read", "write"],
+      organization_id: "org1",
+      display_name: "Someone",
+      id: "1010101",
+      created_at: 0.0,
+    )
   let assert Ok(third_cluster_id) =
     cluster.join_cluster(table, other_network_user, other_ip, outbound)
 
   assert cluster_id != third_cluster_id
 
   let other_org_same_network_user =
-    auth.User(..user, display_name: "Else", id: "fdsadas", organization_id: "2")
+    auth.User(
+      scopes: ["read", "write"],
+      display_name: "Else",
+      id: "fdsadas",
+      organization_id: "2",
+      created_at: 0.0,
+    )
   let assert Ok(fourth_cluster_id) =
     cluster.join_cluster(table, other_org_same_network_user, other_ip, outbound)
 

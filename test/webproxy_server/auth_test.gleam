@@ -7,6 +7,7 @@ const user1 = auth.User(
   display_name: "John Doe",
   scopes: ["read", "write"],
   organization_id: "org1",
+  created_at: 0.0,
 )
 
 const user2 = auth.User(
@@ -14,6 +15,7 @@ const user2 = auth.User(
   display_name: "Jane Smith",
   scopes: ["read"],
   organization_id: "org2",
+  created_at: 0.0,
 )
 
 pub fn get_user_by_auth_token_test() {
