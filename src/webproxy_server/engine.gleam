@@ -55,7 +55,7 @@ pub fn subscribe(
     ))
 
     let _ = mist.send_text_frame(connection, "subscribed")
-    Ok(Authorized(user.id, cluster_id, user.scopes, outbound))
+    Ok(Authorized(user, cluster_id, outbound))
   }
   result.unwrap(check, Unauthorized(ip_address, outbound))
   |> mist.continue
@@ -65,30 +65,29 @@ pub fn require(
   clusters: database.Table(cluster.Cluster),
   pending_resources: database.Table(PendingResource),
   cluster_id: String,
-  user_id: String,
-  scopes: List(String),
+  user: auth.User,
   outbound: Subject(ws.WsCommand),
   resource_name: String,
 ) {
   let peers =
-    cluster.get_connected_peers(clusters, cluster_id, user_id)
+    cluster.get_connected_peers(clusters, cluster_id, user.id)
     |> dict.values()
 
   case
-    add_pending_resource_to_queue(pending_resources, user_id, resource_name)
+    add_pending_resource_to_queue(pending_resources, user.id, resource_name)
   {
     Ok(resource_id) -> {
       let petition =
         json.object([
           #("resourceId", json.string(resource_id)),
-          #("scopes", json.array(scopes, of: json.string)),
+          #("scopes", json.array(user.scopes, of: json.string)),
           #("resourceName", json.string(resource_name)),
         ])
         |> json.to_string()
       let petition = "/r " <> petition
       list.each(peers, fn(peer) { process.send(peer, ws.SendText(petition)) })
       process.spawn(fn() {
-        process.sleep(400)
+        process.sleep(60_000)
         remove_pending_resource_from_queue(pending_resources, resource_id)
       })
       Nil
@@ -98,7 +97,7 @@ pub fn require(
     }
   }
 
-  mist.continue(Authorized(user_id:, scopes:, cluster_id:, outbound:))
+  mist.continue(Authorized(user:, cluster_id:, outbound:))
 }
 
 fn remove_pending_resource_from_queue(
@@ -113,8 +112,7 @@ pub fn provide(
   clusters: database.Table(cluster.Cluster),
   pending_resources: database.Table(PendingResource),
   cluster_id: String,
-  user_id: String,
-  scopes: List(String),
+  user: auth.User,
   outbound: Subject(ws.WsCommand),
   data: String,
 ) -> mist.Next(ws.WsState, a) {
@@ -126,7 +124,7 @@ pub fn provide(
           Ok(pending_resource) -> {
             let _ = database.delete(ref, resource_id)
             let peers =
-              cluster.get_connected_peers(clusters, cluster_id, user_id)
+              cluster.get_connected_peers(clusters, cluster_id, user.id)
             case dict.get(peers, pending_resource.user_id) {
               Ok(peer) -> {
                 string_tree.from_string("/p ")
@@ -144,9 +142,34 @@ pub fn provide(
           Error(_) -> Ok(Nil)
         }
       }
-      mist.continue(Authorized(user_id:, scopes:, cluster_id:, outbound:))
+      mist.continue(Authorized(user:, cluster_id:, outbound:))
     }
     _ -> mist.stop()
+  }
+}
+
+pub fn upgrade(user: auth.User, conn: mist.WebsocketConnection) {
+  case user {
+    auth.User(..) -> {
+      string_tree.from_string("User ")
+      |> string_tree.append(user.display_name)
+      |> string_tree.append(" from organization ")
+      |> string_tree.append(user.organization_id)
+      |> string_tree.append(
+        " tried to upgrade their connection without an administrator account.",
+      )
+      |> string_tree.to_string()
+      |> io.println_error()
+      mist.stop()
+    }
+    auth.SysAdmin(..) -> {
+      let _ =
+        mist.send_text_frame(
+          conn,
+          "Successfully upgraded. You are now in intervention mode.",
+        )
+      mist.continue(ws.Intervention(user))
+    }
   }
 }
 
@@ -155,8 +178,8 @@ pub fn on_close(
   state: ws.WsState,
 ) -> Nil {
   case state {
-    Authorized(user_id:, cluster_id:, ..) ->
-      cluster.leave_cluster(clusters, cluster_id, user_id)
+    Authorized(user:, cluster_id:, ..) ->
+      cluster.leave_cluster(clusters, cluster_id, user.id)
     _ -> Nil
   }
 }

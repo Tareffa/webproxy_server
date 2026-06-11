@@ -6,6 +6,7 @@ import gleam/http/request
 import gleam/httpc
 import gleam/json
 import gleam/result
+import gleam/time/timestamp
 
 pub type User {
   User(
@@ -13,6 +14,14 @@ pub type User {
     display_name: String,
     scopes: List(String),
     organization_id: String,
+    created_at: Float,
+  )
+  SysAdmin(
+    id: String,
+    display_name: String,
+    scopes: List(String),
+    organization_id: String,
+    created_at: Float,
   )
 }
 
@@ -21,12 +30,45 @@ fn json_to_user_decoder() -> decode.Decoder(User) {
   use display_name <- decode.field("displayName", decode.string)
   use scopes <- decode.field("scopes", decode.list(decode.string))
   use organization_id <- decode.field("organization_id", decode.string)
-  decode.success(User(id:, display_name:, scopes:, organization_id:))
+  let created_at = timestamp.system_time() |> timestamp.to_unix_seconds()
+  use is_admin <- decode.field("isAdmin", decode.bool)
+  case is_admin {
+    True ->
+      decode.success(SysAdmin(
+        id:,
+        display_name:,
+        scopes:,
+        organization_id:,
+        created_at:,
+      ))
+    False ->
+      decode.success(User(
+        id:,
+        display_name:,
+        scopes:,
+        organization_id:,
+        created_at:,
+      ))
+  }
 }
 
 pub fn new_user_table() -> database.Table(User) {
   atom.create("users_table")
   |> database.create_ets_table
+}
+
+fn store_user(cache: database.Table(User), token: String, user: User) -> Nil {
+  case user {
+    // Don't store SysAdmins
+    SysAdmin(..) -> Nil
+    User(..) -> {
+      let _query = {
+        use ref <- database.transaction(cache)
+        database.upsert(ref, token, user)
+      }
+      Nil
+    }
+  }
 }
 
 pub fn get_user_by_auth_token(
@@ -47,10 +89,7 @@ pub fn get_user_by_auth_token(
         json.parse(resp.body, json_to_user_decoder()),
         Nil,
       ))
-      let _query = {
-        use ref <- database.transaction(cache)
-        database.upsert(ref, token, user)
-      }
+      store_user(cache, token, user)
       Ok(user)
     }
     _ -> Error(Nil)
