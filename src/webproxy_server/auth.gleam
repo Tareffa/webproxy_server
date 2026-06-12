@@ -28,7 +28,7 @@ fn json_to_user_decoder() -> decode.Decoder(User) {
   use id <- decode.field("id", decode.string)
   use display_name <- decode.field("displayName", decode.string)
   use scopes <- decode.field("scopes", decode.list(decode.string))
-  use organization_id <- decode.field("organization_id", decode.string)
+  use organization_id <- decode.field("organizationId", decode.string)
   let created_at = timestamp.system_time() |> timestamp.to_unix_seconds()
   use is_admin <- decode.field("isAdmin", decode.bool)
   case is_admin {
