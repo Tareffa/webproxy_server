@@ -106,6 +106,7 @@ pub fn info(
   let bandwidth_saved = process.call(memory_counter.data, waiting: 10, sending: Get)
 
   let resp = response.new(200)
+  |> web.set_default_headers
   json.object([
     #("userCount", json.int(user_count)),
     #("clusterCount", json.int(cluster_count)),

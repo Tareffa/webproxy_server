@@ -19,6 +19,12 @@ pub fn set_body(
   response.set_body(resp, mist.Bytes(bytes_tree.from_string(body)))
 }
 
+pub fn set_default_headers(resp: response.Response(a)) {
+  response.set_header(resp, "Access-Control-Allow-Headers", "*")
+  |> response.set_header("Access-Control-Allow-Methods", "GET,HEAD,PUT,PATCH,DELETE,OPTIONS")
+  |> response.set_header("Access-Control-Allow-Origin", "*")
+}
+
 pub fn health() -> response.Response(mist.ResponseData) {
   response.new(200)
   |> set_body(json.to_string(json.object([#("status", json.string("UP"))])))
