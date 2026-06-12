@@ -32,7 +32,7 @@ fn user_parser() {
       #("displayName", json.string(display_name)),
       #("scopes", json.array(scopes, of: json.string)),
       #("organization_id", json.string(int.to_string(num_org_id))),
-      #("is_admin", json.bool(user_type == 7))
+      #("is_admin", json.bool(user_type == 9))
     ]),
   )
 }
