@@ -41,8 +41,7 @@ pub fn authenticate(req: Request(body)) -> Response(ResponseData) {
   case request.get_header(req, "authorization") {
     Error(Nil) -> web.unauthorized()
     Ok(auth_token) -> {
-      // let assert Ok(url) = envoy.get("OAUTH_BASE_URL")
-      let url = "https://oauth.ottimizza.com.br"
+      let assert Ok(url) = envoy.get("OAUTH_BASE_URL")
       let url = url <> "/oauth/userinfo"
       let assert Ok(req) = request.to(url)
       let req =
