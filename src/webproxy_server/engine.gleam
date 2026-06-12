@@ -1,3 +1,4 @@
+import webproxy_server/ottimizza
 import database
 import gleam/dict
 import gleam/erlang/atom
@@ -111,6 +112,7 @@ fn remove_pending_resource_from_queue(
 pub fn provide(
   clusters: database.Table(cluster.Cluster),
   pending_resources: database.Table(PendingResource),
+  bandwidth_counter: ottimizza.BandCounter,
   cluster_id: String,
   user: auth.User,
   outbound: Subject(ws.WsCommand),
@@ -134,6 +136,7 @@ pub fn provide(
                 |> string_tree.to_string()
                 |> ws.SendText
                 |> process.send(peer, _)
+                process.send(bandwidth_counter.data, ottimizza.Add(string.byte_size(response_json)))
                 Ok(Nil)
               }
               Error(_) -> Ok(Nil)

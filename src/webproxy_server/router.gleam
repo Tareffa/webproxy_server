@@ -16,6 +16,7 @@ pub type Database {
     users: database.Table(auth.User),
     clusters: database.Table(cluster.Cluster),
     pending_resources: database.Table(engine.PendingResource),
+    bandwidth_counter: ottimizza.BandCounter
   )
 }
 
@@ -25,6 +26,7 @@ pub fn handle_request(
 ) -> response.Response(mist.ResponseData) {
   case request.path_segments(request) {
     ["auth_relay"] -> ottimizza.authenticate(request)
+    ["info"] -> ottimizza.info(db.users, db.clusters, db.bandwidth_counter)
     ["health"] -> web.health()
     ["ws"] ->
       mist.websocket(
@@ -90,6 +92,7 @@ fn handle_ws_message(
       engine.provide(
         db.clusters,
         db.pending_resources,
+        db.bandwidth_counter,
         cluster_id,
         user,
         outbound,

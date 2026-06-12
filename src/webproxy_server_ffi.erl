@@ -2,7 +2,10 @@
 
 -define(SECONDS_IN_24H, 86400).
 
--export([delete_old_users_from_table/1]).
+-export([delete_old_users_from_table/1, table_size/1]).
+
+table_size(Table) ->
+    ets:info(element(2, Table), size).
 
 %% Users follow this pattern:
 %% {UserId, {user, UserId, DisplayName, Scopes, OrganizationId, CreatedAt}}
@@ -15,4 +18,4 @@ delete_old_users_from_table(Table) ->
             [true]                                     %% Delete matching entries
         }
     ],
-    ets:select_delete(Table, MatchSpec).
+    ets:select_delete(element(2, Table), MatchSpec).

@@ -1,3 +1,8 @@
+import gleam/otp/actor
+import gleam/erlang/process
+import webproxy_server/cluster
+import webproxy_server/auth
+import database
 import envoy
 import gleam/dynamic/decode
 import gleam/http
@@ -63,4 +68,49 @@ pub fn authenticate(req: Request(body)) -> Response(ResponseData) {
       }
     }
   }
+}
+
+pub type Message {
+  Add(value: Int)
+  Get(reply_with: process.Subject(Int))
+}
+
+
+fn handle_message(state: Int, message: Message) -> actor.Next(Int, Message) {
+  case message {
+    Add(value) -> actor.continue(value + state)
+    Get(client) -> {
+      process.send(client, state)
+      actor.continue(state)
+    }
+  }
+}
+
+pub type BandCounter = actor.Started(process.Subject(Message))
+pub fn start_counter() {
+  actor.new(0)
+  |> actor.on_message(handle_message)
+  |> actor.start
+}
+
+@external(erlang, "webproxy_server_ffi", "table_size")
+fn table_size(table: database.Table(a)) -> Int
+
+pub fn info(
+  users: database.Table(auth.User),
+  clusters: database.Table(cluster.Cluster),
+  memory_counter: BandCounter 
+) {
+  let user_count = table_size(users)
+  let cluster_count = table_size(clusters)
+  let bandwidth_saved = process.call(memory_counter.data, waiting: 10, sending: Get)
+
+  let resp = response.new(200)
+  json.object([
+    #("userCount", json.int(user_count)),
+    #("clusterCount", json.int(cluster_count)),
+    #("bandwidthSaved", json.int(bandwidth_saved))
+  ])
+  |> json.to_string()
+  |> web.set_body(resp, _)
 }
