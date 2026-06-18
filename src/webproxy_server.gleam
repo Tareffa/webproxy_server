@@ -21,7 +21,8 @@ pub fn main() -> Nil {
   let clusters = cluster.new_clusters_table()
   let pending_resources = engine.new_pending_resources_queue()
   let assert Ok(bandwidth_counter) = ottimizza.start_counter()
-  let db = router.Database(users:, clusters:, pending_resources:, bandwidth_counter:)
+  let assert Ok(hit_counter) = ottimizza.start_cache_hit_counter()
+  let db = router.Database(users:, clusters:, pending_resources:, bandwidth_counter:, hit_counter:)
 
   let port = get_port()
 

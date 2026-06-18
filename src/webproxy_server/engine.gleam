@@ -69,6 +69,7 @@ pub fn require(
   user: auth.User,
   outbound: Subject(ws.WsCommand),
   resource_name: String,
+  hit_counter: ottimizza.HitCounter
 ) {
   let peers =
     cluster.get_connected_peers(clusters, cluster_id, user.id)
@@ -89,7 +90,7 @@ pub fn require(
       list.each(peers, fn(peer) { process.send(peer, ws.SendText(petition)) })
       process.spawn(fn() {
         process.sleep(60_000)
-        remove_pending_resource_from_queue(pending_resources, resource_id)
+        remove_pending_resource_from_queue(pending_resources, resource_id, hit_counter)
       })
       Nil
     }
@@ -104,9 +105,16 @@ pub fn require(
 fn remove_pending_resource_from_queue(
   queue: database.Table(PendingResource),
   resource_id: String,
+  hit_counter: ottimizza.HitCounter,
 ) {
   use ref <- database.transaction(queue)
-  database.delete(ref, resource_id)
+  case database.find(ref, resource_id) {
+    Ok(_) -> {
+        ottimizza.miss(hit_counter)
+        database.delete(ref, resource_id)
+    }
+    Error(_) -> Ok(Nil)
+  }
 }
 
 pub fn provide(
@@ -117,6 +125,7 @@ pub fn provide(
   user: auth.User,
   outbound: Subject(ws.WsCommand),
   data: String,
+  hit_counter: ottimizza.HitCounter
 ) -> mist.Next(ws.WsState, a) {
   case string.split_once(data, " ") {
     Ok(#(resource_id, response_json)) -> {
@@ -124,6 +133,7 @@ pub fn provide(
         use ref <- database.transaction(pending_resources)
         case database.find(ref, resource_id) {
           Ok(pending_resource) -> {
+            ottimizza.hit(hit_counter)
             let _ = database.delete(ref, resource_id)
             let peers =
               cluster.get_connected_peers(clusters, cluster_id, user.id)

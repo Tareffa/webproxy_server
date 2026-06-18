@@ -16,7 +16,8 @@ pub type Database {
     users: database.Table(auth.User),
     clusters: database.Table(cluster.Cluster),
     pending_resources: database.Table(engine.PendingResource),
-    bandwidth_counter: ottimizza.BandCounter
+    bandwidth_counter: ottimizza.BandCounter,
+    hit_counter: ottimizza.HitCounter
   )
 }
 
@@ -26,7 +27,7 @@ pub fn handle_request(
 ) -> response.Response(mist.ResponseData) {
   case request.path_segments(request) {
     ["auth_relay"] -> ottimizza.authenticate(request)
-    ["info"] -> ottimizza.info(db.users, db.clusters, db.bandwidth_counter)
+    ["info"] -> ottimizza.info(db.users, db.clusters, db.bandwidth_counter, db.hit_counter)
     ["health"] -> web.health()
     ["ws"] ->
       mist.websocket(
@@ -63,6 +64,10 @@ fn handle_ws_message(
   case message, state {
     _, Unreacheable -> mist.stop()
     mist.Text("ping"), _ -> engine.ping(conn, state)
+    mist.Text("/h"), _ -> {
+      ottimizza.hit(db.hit_counter)
+      mist.continue(state)
+    }
 
     mist.Text("/s " <> auth_token), Unauthorized(address, outbound) ->
       engine.subscribe(
@@ -85,6 +90,7 @@ fn handle_ws_message(
         user,
         outbound,
         resource_name,
+        db.hit_counter
       )
     }
 
@@ -97,6 +103,7 @@ fn handle_ws_message(
         user,
         outbound,
         data,
+        db.hit_counter
       )
     }
 

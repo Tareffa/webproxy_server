@@ -70,6 +70,42 @@ pub fn authenticate(req: Request(body)) -> Response(ResponseData) {
   }
 }
 
+pub type CacheHitMessage {
+  Hit 
+  Miss
+  GetData(reply_with: process.Subject(CacheHit))
+}
+
+pub type CacheHit {
+  CacheHit(hits: Int, misses: Int)
+}
+
+fn handle_cache_hit_message(state: CacheHit, message: CacheHitMessage) -> actor.Next(CacheHit, CacheHitMessage) {
+  case message {
+    Hit -> actor.continue(CacheHit(state.hits + 1, state.misses))
+    Miss -> actor.continue(CacheHit(state.hits, state.misses + 1))
+    GetData(client) -> {
+      process.send(client, state)
+      actor.continue(state)
+    }
+  }
+}
+
+pub type HitCounter = actor.Started(process.Subject(CacheHitMessage))
+pub fn start_cache_hit_counter() {
+  actor.new(CacheHit(0, 0))
+  |> actor.on_message(handle_cache_hit_message)
+  |> actor.start
+}
+
+pub fn hit(counter: HitCounter) {
+  process.send(counter.data, Hit)
+}
+
+pub fn miss(counter: HitCounter) {
+  process.send(counter.data, Miss)
+}
+
 pub type Message {
   Add(value: Int)
   Get(reply_with: process.Subject(Int))
@@ -99,18 +135,22 @@ fn table_size(table: database.Table(a)) -> Int
 pub fn info(
   users: database.Table(auth.User),
   clusters: database.Table(cluster.Cluster),
-  memory_counter: BandCounter 
+  memory_counter: BandCounter,
+  hit_counter: HitCounter
 ) {
   let user_count = table_size(users)
   let cluster_count = table_size(clusters)
   let bandwidth_saved = process.call(memory_counter.data, waiting: 10, sending: Get)
+  let hit_ratio = process.call(hit_counter.data, waiting: 10, sending: GetData)
 
   let resp = response.new(200)
   |> web.set_default_headers
   json.object([
     #("userCount", json.int(user_count)),
     #("clusterCount", json.int(cluster_count)),
-    #("bandwidthSaved", json.int(bandwidth_saved))
+    #("bandwidthSaved", json.int(bandwidth_saved)),
+    #("cacheMissCount", json.int(hit_ratio.misses)),
+    #("cacheHitCount", json.int(hit_ratio.hits))
   ])
   |> json.to_string()
   |> web.set_body(resp, _)
