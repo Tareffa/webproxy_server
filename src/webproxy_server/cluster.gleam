@@ -8,8 +8,16 @@ import gleam/result
 import webproxy_server/auth
 import webproxy_server/ws
 
-pub type Cluster =
-  Dict(String, Subject(ws.WsCommand))
+/// A cluster groups every connection that resolves to the same
+/// `(organization_id, ip_address)` pair. The pair is kept alongside the members
+/// so it can be reported even though the cluster id itself is a one-way hash.
+pub type Cluster {
+  Cluster(
+    organization_id: String,
+    ip_address: String,
+    members: Dict(String, Subject(ws.WsCommand)),
+  )
+}
 
 pub fn new_clusters_table() -> database.Table(Cluster) {
   atom.create("clusters_table")
@@ -28,10 +36,11 @@ pub fn join_cluster(
     |> bit_array.base64_url_encode(True)
   let _query = {
     use ref <- database.transaction(table)
-    database.find(ref, cluster_id)
-    |> result.unwrap(dict.new())
-    |> dict.insert(user.id, outbound)
-    |> database.upsert(ref, cluster_id, _)
+    let cluster =
+      database.find(ref, cluster_id)
+      |> result.unwrap(Cluster(user.organization_id, ip_address, dict.new()))
+    let members = dict.insert(cluster.members, user.id, outbound)
+    database.upsert(ref, cluster_id, Cluster(..cluster, members:))
   }
   Ok(cluster_id)
 }
@@ -43,15 +52,17 @@ pub fn leave_cluster(
 ) -> Nil {
   let _ = {
     use ref <- database.transaction(table)
-    let members =
-      database.find(ref, cluster_id)
-      |> result.unwrap(dict.new())
-      |> dict.delete(user_id)
-
-    case dict.is_empty(members) {
-      True -> database.delete(ref, cluster_id)
-      False ->
-        database.upsert(ref, cluster_id, members) |> result.map(fn(_) { Nil })
+    case database.find(ref, cluster_id) {
+      Error(_) -> Ok(Nil)
+      Ok(cluster) -> {
+        let members = dict.delete(cluster.members, user_id)
+        case dict.is_empty(members) {
+          True -> database.delete(ref, cluster_id)
+          False ->
+            database.upsert(ref, cluster_id, Cluster(..cluster, members:))
+            |> result.map(fn(_) { Nil })
+        }
+      }
     }
   }
   Nil
@@ -66,6 +77,8 @@ pub fn get_connected_peers(
     use ref <- database.transaction(table)
     database.find(ref, id)
   }
-  result.unwrap(query, dict.new())
-  |> dict.filter(fn(key, _) { key != user_id })
+  case query {
+    Ok(cluster) -> dict.filter(cluster.members, fn(key, _) { key != user_id })
+    Error(_) -> dict.new()
+  }
 }

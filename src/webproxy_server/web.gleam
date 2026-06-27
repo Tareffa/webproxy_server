@@ -21,7 +21,10 @@ pub fn set_body(
 
 pub fn set_default_headers(resp: response.Response(a)) {
   response.set_header(resp, "Access-Control-Allow-Headers", "*")
-  |> response.set_header("Access-Control-Allow-Methods", "GET,HEAD,PUT,PATCH,DELETE,OPTIONS")
+  |> response.set_header(
+    "Access-Control-Allow-Methods",
+    "GET,HEAD,PUT,PATCH,DELETE,OPTIONS",
+  )
   |> response.set_header("Access-Control-Allow-Origin", "*")
 }
 

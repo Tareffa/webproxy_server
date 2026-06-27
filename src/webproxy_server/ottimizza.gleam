@@ -1,17 +1,17 @@
-import gleam/otp/actor
-import gleam/erlang/process
-import webproxy_server/cluster
-import webproxy_server/auth
 import database
 import envoy
 import gleam/dynamic/decode
+import gleam/erlang/process
 import gleam/http
 import gleam/http/request.{type Request}
 import gleam/http/response.{type Response}
 import gleam/httpc
 import gleam/int
 import gleam/json
+import gleam/otp/actor
 import mist.{type ResponseData}
+import webproxy_server/auth
+import webproxy_server/cluster
 import webproxy_server/web
 
 fn user_parser() {
@@ -37,7 +37,7 @@ fn user_parser() {
       #("displayName", json.string(display_name)),
       #("scopes", json.array(scopes, of: json.string)),
       #("organizationId", json.string(int.to_string(num_org_id))),
-      #("isAdmin", json.bool(user_type == 9))
+      #("isAdmin", json.bool(user_type == 9)),
     ]),
   )
 }
@@ -71,7 +71,7 @@ pub fn authenticate(req: Request(body)) -> Response(ResponseData) {
 }
 
 pub type CacheHitMessage {
-  Hit 
+  Hit
   Miss
   GetData(reply_with: process.Subject(CacheHit))
 }
@@ -80,7 +80,10 @@ pub type CacheHit {
   CacheHit(hits: Int, misses: Int)
 }
 
-fn handle_cache_hit_message(state: CacheHit, message: CacheHitMessage) -> actor.Next(CacheHit, CacheHitMessage) {
+fn handle_cache_hit_message(
+  state: CacheHit,
+  message: CacheHitMessage,
+) -> actor.Next(CacheHit, CacheHitMessage) {
   case message {
     Hit -> actor.continue(CacheHit(state.hits + 1, state.misses))
     Miss -> actor.continue(CacheHit(state.hits, state.misses + 1))
@@ -91,7 +94,9 @@ fn handle_cache_hit_message(state: CacheHit, message: CacheHitMessage) -> actor.
   }
 }
 
-pub type HitCounter = actor.Started(process.Subject(CacheHitMessage))
+pub type HitCounter =
+  actor.Started(process.Subject(CacheHitMessage))
+
 pub fn start_cache_hit_counter() {
   actor.new(CacheHit(0, 0))
   |> actor.on_message(handle_cache_hit_message)
@@ -111,7 +116,6 @@ pub type Message {
   Get(reply_with: process.Subject(Int))
 }
 
-
 fn handle_message(state: Int, message: Message) -> actor.Next(Int, Message) {
   case message {
     Add(value) -> actor.continue(value + state)
@@ -122,7 +126,9 @@ fn handle_message(state: Int, message: Message) -> actor.Next(Int, Message) {
   }
 }
 
-pub type BandCounter = actor.Started(process.Subject(Message))
+pub type BandCounter =
+  actor.Started(process.Subject(Message))
+
 pub fn start_counter() {
   actor.new(0)
   |> actor.on_message(handle_message)
@@ -136,21 +142,23 @@ pub fn info(
   users: database.Table(auth.User),
   clusters: database.Table(cluster.Cluster),
   memory_counter: BandCounter,
-  hit_counter: HitCounter
+  hit_counter: HitCounter,
 ) {
   let user_count = table_size(users)
   let cluster_count = table_size(clusters)
-  let bandwidth_saved = process.call(memory_counter.data, waiting: 10, sending: Get)
+  let bandwidth_saved =
+    process.call(memory_counter.data, waiting: 10, sending: Get)
   let hit_ratio = process.call(hit_counter.data, waiting: 10, sending: GetData)
 
-  let resp = response.new(200)
-  |> web.set_default_headers
+  let resp =
+    response.new(200)
+    |> web.set_default_headers
   json.object([
     #("userCount", json.int(user_count)),
     #("clusterCount", json.int(cluster_count)),
     #("bandwidthSaved", json.int(bandwidth_saved)),
     #("cacheMissCount", json.int(hit_ratio.misses)),
-    #("cacheHitCount", json.int(hit_ratio.hits))
+    #("cacheHitCount", json.int(hit_ratio.hits)),
   ])
   |> json.to_string()
   |> web.set_body(resp, _)

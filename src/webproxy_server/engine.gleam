@@ -1,4 +1,3 @@
-import webproxy_server/ottimizza
 import database
 import gleam/dict
 import gleam/erlang/atom
@@ -12,6 +11,8 @@ import gleam/string_tree
 import mist
 import webproxy_server/auth
 import webproxy_server/cluster
+import webproxy_server/environment
+import webproxy_server/ottimizza
 import webproxy_server/ws.{Authorized, Unauthorized}
 
 pub opaque type PendingResource {
@@ -56,7 +57,7 @@ pub fn subscribe(
     ))
 
     let _ = mist.send_text_frame(connection, "subscribed")
-    Ok(Authorized(user, cluster_id, outbound))
+    Ok(Authorized(user, cluster_id, ip_address, outbound))
   }
   result.unwrap(check, Unauthorized(ip_address, outbound))
   |> mist.continue
@@ -67,9 +68,10 @@ pub fn require(
   pending_resources: database.Table(PendingResource),
   cluster_id: String,
   user: auth.User,
+  ip_address: String,
   outbound: Subject(ws.WsCommand),
   resource_name: String,
-  hit_counter: ottimizza.HitCounter
+  hit_counter: ottimizza.HitCounter,
 ) {
   let peers =
     cluster.get_connected_peers(clusters, cluster_id, user.id)
@@ -90,7 +92,11 @@ pub fn require(
       list.each(peers, fn(peer) { process.send(peer, ws.SendText(petition)) })
       process.spawn(fn() {
         process.sleep(60_000)
-        remove_pending_resource_from_queue(pending_resources, resource_id, hit_counter)
+        remove_pending_resource_from_queue(
+          pending_resources,
+          resource_id,
+          hit_counter,
+        )
       })
       Nil
     }
@@ -99,7 +105,7 @@ pub fn require(
     }
   }
 
-  mist.continue(Authorized(user:, cluster_id:, outbound:))
+  mist.continue(Authorized(user:, cluster_id:, ip_address:, outbound:))
 }
 
 fn remove_pending_resource_from_queue(
@@ -110,8 +116,8 @@ fn remove_pending_resource_from_queue(
   use ref <- database.transaction(queue)
   case database.find(ref, resource_id) {
     Ok(_) -> {
-        ottimizza.miss(hit_counter)
-        database.delete(ref, resource_id)
+      ottimizza.miss(hit_counter)
+      database.delete(ref, resource_id)
     }
     Error(_) -> Ok(Nil)
   }
@@ -123,9 +129,10 @@ pub fn provide(
   bandwidth_counter: ottimizza.BandCounter,
   cluster_id: String,
   user: auth.User,
+  ip_address: String,
   outbound: Subject(ws.WsCommand),
   data: String,
-  hit_counter: ottimizza.HitCounter
+  hit_counter: ottimizza.HitCounter,
 ) -> mist.Next(ws.WsState, a) {
   case string.split_once(data, " ") {
     Ok(#(resource_id, response_json)) -> {
@@ -146,7 +153,10 @@ pub fn provide(
                 |> string_tree.to_string()
                 |> ws.SendText
                 |> process.send(peer, _)
-                process.send(bandwidth_counter.data, ottimizza.Add(string.byte_size(response_json)))
+                process.send(
+                  bandwidth_counter.data,
+                  ottimizza.Add(string.byte_size(response_json)),
+                )
                 Ok(Nil)
               }
               Error(_) -> Ok(Nil)
@@ -155,15 +165,19 @@ pub fn provide(
           Error(_) -> Ok(Nil)
         }
       }
-      mist.continue(Authorized(user:, cluster_id:, outbound:))
+      mist.continue(Authorized(user:, cluster_id:, ip_address:, outbound:))
     }
     _ -> mist.stop()
   }
 }
 
-pub fn upgrade(user: auth.User, conn: mist.WebsocketConnection) {
-  case user {
-    auth.User(..) -> {
+pub fn upgrade(
+  user: auth.User,
+  ip_address: String,
+  conn: mist.WebsocketConnection,
+) {
+  case user, ip_is_authorized_administrator(ip_address) {
+    auth.User(..), _ -> {
       string_tree.from_string("User ")
       |> string_tree.append(user.display_name)
       |> string_tree.append(" from organization ")
@@ -175,7 +189,19 @@ pub fn upgrade(user: auth.User, conn: mist.WebsocketConnection) {
       |> io.println_error()
       mist.stop()
     }
-    auth.SysAdmin(..) -> {
+    auth.SysAdmin(..), False -> {
+      string_tree.from_string("Administrator ")
+      |> string_tree.append(user.display_name)
+      |> string_tree.append(" tried to upgrade their connection from ")
+      |> string_tree.append(ip_address)
+      |> string_tree.append(
+        ", which is not in the AUTHORIZED_ADMINISTRATOR_IPS list.",
+      )
+      |> string_tree.to_string()
+      |> io.println_error()
+      mist.stop()
+    }
+    auth.SysAdmin(..), True -> {
       let _ =
         mist.send_text_frame(
           conn,
@@ -184,6 +210,11 @@ pub fn upgrade(user: auth.User, conn: mist.WebsocketConnection) {
       mist.continue(ws.Intervention(user))
     }
   }
+}
+
+fn ip_is_authorized_administrator(ip_address: String) -> Bool {
+  let authorized = environment.authorized_administrator_ips()
+  list.contains(authorized, "*") || list.contains(authorized, ip_address)
 }
 
 pub fn on_close(

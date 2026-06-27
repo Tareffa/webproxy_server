@@ -6,6 +6,7 @@ import gleam/httpc
 import gleam/json
 import gleam/result
 import gleam/time/timestamp
+import webproxy_server/environment
 
 pub type User {
   User(
@@ -96,11 +97,7 @@ pub fn get_user_by_auth_token(
 }
 
 fn prepare_auth_request(token: String) {
-  let assert Ok(base_req) = request.to(get_authentication_url())
+  let assert Ok(base_req) = request.to(environment.authentication_url())
   request.prepend_header(base_req, "accept", "application/json")
   |> request.prepend_header("authorization", token)
-}
-
-fn get_authentication_url() {
-  "http://localhost:8080/auth_relay"
 }
