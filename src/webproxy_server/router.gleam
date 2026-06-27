@@ -45,10 +45,8 @@ pub fn handle_request(
             process.new_selector()
             |> process.select(for: outbound)
 
-          let state = case mist.get_connection_info(request.body) {
-            Ok(info) -> {
-              Unauthorized(mist.ip_address_to_string(info.ip_address), outbound)
-            }
+          let state = case web.resolve_ip_address(request) {
+            Ok(address) -> Unauthorized(address, outbound)
             Error(_) -> Unreacheable
           }
           #(state, Some(selector))

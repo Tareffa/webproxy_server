@@ -22,6 +22,14 @@ All configuration is read from environment variables, centralized in `src/webpro
 | `AUTHENTICATION_URL` | Yes | — | Full HTTPS URL of your authentication endpoint. Must start with `https://`. The server refuses to start without a valid value. See [Authentication Service](#authentication-service). |
 | `PORT` | No | `8080` | TCP port the server binds to. Falls back to `8080` when unset or invalid. |
 | `AUTHORIZED_ADMINISTRATOR_IPS` | No | `[]` | JSON array of IP addresses allowed to use the `/upgrade` intervention command. See [Administrator IPs](#administrator-ips). |
+| `USE_NATIVE_CONNECTION_IP` | No | `false` | When `false` (the default, for deployments behind a reverse proxy), the client IP is read from the `X-Forwarded-For` header, falling back to `X-Real-IP`. When `true`, or when neither header is present, the transport-level connection IP is used. Accepts `true`/`1` for true; any other value is false. See [Client IP Resolution](#client-ip-resolution). |
+
+### Client IP Resolution
+
+The server identifies each connecting client by IP, which feeds authorization and the [Administrator IPs](#administrator-ips) gate. Because the server usually sits behind a reverse proxy, by default it trusts the `X-Forwarded-For` header (falling back to `X-Real-IP`) rather than the raw socket address.
+
+- **`USE_NATIVE_CONNECTION_IP` unset or `false`** → use `X-Forwarded-For`, then `X-Real-IP`, then the transport-level connection IP if neither header is present.
+- **`USE_NATIVE_CONNECTION_IP=true`** → always use the transport-level connection IP, ignoring the headers. Use this only when clients connect directly, since forwarded headers can be spoofed when not set by a trusted proxy.
 
 ### Administrator IPs
 
