@@ -24,7 +24,7 @@ pub fn join_cluster_test() {
     use ref <- database.transaction(table)
     database.find(ref, cluster_id)
   }
-  assert dict.size(cluster) == 1
+  assert dict.size(cluster.members) == 1
 }
 
 pub fn leave_cluster_test() {

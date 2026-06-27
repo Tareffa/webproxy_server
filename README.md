@@ -13,6 +13,24 @@ The runtime is intentionally small:
 5. Resource requests are broadcast only to peers in the same cluster.
 6. Responses are routed back to the requesting user.
 
+## Environment Variables
+
+All configuration is read from environment variables, centralized in `src/webproxy_server/environment.gleam`.
+
+| Variable | Required | Default | Description |
+| --- | --- | --- | --- |
+| `AUTHENTICATION_URL` | Yes | — | Full HTTPS URL of your authentication endpoint. Must start with `https://`. The server refuses to start without a valid value. See [Authentication Service](#authentication-service). |
+| `PORT` | No | `8080` | TCP port the server binds to. Falls back to `8080` when unset or invalid. |
+| `AUTHORIZED_ADMINISTRATOR_IPS` | No | `[]` | JSON array of IP addresses allowed to use the `/upgrade` intervention command. See [Administrator IPs](#administrator-ips). |
+
+### Administrator IPs
+
+`AUTHORIZED_ADMINISTRATOR_IPS` is a JSON string holding an array of IP addresses, for example `["10.0.0.5", "10.0.0.6"]`. It gates the `/upgrade` command on top of the existing SysAdmin check, so a SysAdmin must also connect from an authorized IP to enter intervention mode.
+
+- **Unset, empty, or malformed** → the list is treated as empty and **no one** is allowed to upgrade.
+- **Contains `"*"`** → **any** IP address is allowed to upgrade. The server prints a warning at boot because this is potentially dangerous.
+- **Otherwise** → only the listed IP addresses are allowed to upgrade.
+
 ## Authentication Service
 
 Set `AUTHENTICATION_URL` to the full HTTPS URL of your authentication endpoint.
@@ -73,7 +91,10 @@ If you need a different grouping rule, update the cluster id generation in `src/
 | `/s <auth_token>` | Unauthenticated client | Authenticates the user, joins the cluster, and replies with `subscribed` on success. |
 | `/r <resource_name>` | Authenticated client | Requests a resource from peers in the same cluster. The server queues the request and forwards it to connected peers. |
 | `/p <resource_id> <response_json>` | Authenticated client | Provides a response for a previously requested resource. The server routes the response back to the original requester. |
-| `/upgrade` | Authenticated SysAdmin only | Switches the connection into intervention mode. Non-admin users are rejected. |
+| `/upgrade` | Authenticated SysAdmin from an authorized IP | Switches the connection into intervention mode. Non-admin users, and SysAdmins connecting from an IP not listed in `AUTHORIZED_ADMINISTRATOR_IPS`, are rejected. |
+| `/su-drop <table> <value>` | Intervention mode only | Deletes a single value from a table. See [Intervention Commands](#intervention-commands). |
+| `/su-clinfo [<cluster_id> \| user <display_name>]` | Intervention mode only | Reports cluster membership. See [Intervention Commands](#intervention-commands). |
+| `/su-invalidate <resource_name> [user <display_name> \| cluster <cluster_id>]` | Intervention mode only | Forces connected clients to evict a cached resource. See [Intervention Commands](#intervention-commands). |
 
 ### Server To Client
 
@@ -84,6 +105,35 @@ If you need a different grouping rule, update the cluster id generation in `src/
 | `/r {resource request json}` | Peers in the same cluster | Broadcasts a resource petition containing `resourceId`, `scopes`, and `resourceName`. |
 | `/p <resource_name> <response_json>` | The original requester | Delivers the response payload for the pending resource. |
 | `Successfully upgraded. You are now in intervention mode.` | A SysAdmin that sent `/upgrade` | Confirms that the connection has been upgraded. |
+| `/d <resource_name>` | Clients targeted by `/su-invalidate` | Instructs the client to evict the named resource from its cache. |
+
+### Intervention Commands
+
+Once a SysAdmin connection has entered intervention mode with `/upgrade`, the following privileged commands become available. They are rejected on any other connection. Each command replies with a short status line.
+
+#### `/su-drop <table> <value>`
+
+Deletes a single value from one of the tables. `<table>` is one of:
+
+- `users` — `<value>` is the user's `display_name` (NOT their id or auth token). Every stored user with that display name is removed.
+- `clusters` — `<value>` is a cluster id.
+- `pending_resources` — `<value>` is a pending resource id.
+
+#### `/su-clinfo [<cluster_id> | user <display_name>]`
+
+Reports each matching cluster's id, ip address, organization, and the display names of its members.
+
+- `/su-clinfo` — reports every cluster.
+- `/su-clinfo <cluster_id>` — reports only that cluster.
+- `/su-clinfo user <display_name>` — reports only the clusters the named user belongs to.
+
+#### `/su-invalidate <resource_name> [user <display_name> | cluster <cluster_id>]`
+
+Pushes a `/d <resource_name>` frame to live connections so they evict the cached resource.
+
+- `/su-invalidate <resource_name>` — targets every connection.
+- `/su-invalidate <resource_name> user <display_name>` — targets only the connections of the named user.
+- `/su-invalidate <resource_name> cluster <cluster_id>` — targets only the connections in that cluster.
 
 ### Resource Exchange Flow
 
@@ -118,6 +168,7 @@ Run the container:
 docker run --rm \
   -e AUTHENTICATION_URL="https://your-auth-server.example.com/auth" \
   -e PORT=8080 \
+  -e AUTHORIZED_ADMINISTRATOR_IPS='["10.0.0.5"]' \
   -p 8080:8080 \
   webproxy-server
 ```
@@ -131,10 +182,11 @@ For local development, run the project directly with Gleam:
 ```sh
 export AUTHENTICATION_URL="https://your-auth-server.example.com/auth"
 export PORT=8080
+export AUTHORIZED_ADMINISTRATOR_IPS='["10.0.0.5"]'
 gleam run
 ```
 
-If `PORT` is not set, the server falls back to `8080`.
+If `PORT` is not set, the server falls back to `8080`. See [Environment Variables](#environment-variables) for the full list.
 
 ## License
 

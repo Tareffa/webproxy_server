@@ -7,8 +7,9 @@ import mist
 import webproxy_server/auth
 import webproxy_server/cluster
 import webproxy_server/engine
+import webproxy_server/intervention
 import webproxy_server/web
-import webproxy_server/ws.{Authorized, Unauthorized, Unreacheable}
+import webproxy_server/ws.{Authorized, Intervention, Unauthorized, Unreacheable}
 
 pub type Database {
   Database(
@@ -72,30 +73,58 @@ fn handle_ws_message(
 
     _, Unauthorized(_, _) -> mist.continue(state)
 
-    mist.Text("/r " <> resource_name), Authorized(user:, cluster_id:, outbound:)
+    mist.Text("/r " <> resource_name),
+      Authorized(user:, cluster_id:, ip_address:, outbound:)
     -> {
       engine.require(
         db.clusters,
         db.pending_resources,
         cluster_id,
         user,
+        ip_address,
         outbound,
         resource_name,
       )
     }
 
-    mist.Text("/p " <> data), Authorized(user:, cluster_id:, outbound:) -> {
+    mist.Text("/p " <> data),
+      Authorized(user:, cluster_id:, ip_address:, outbound:)
+    -> {
       engine.provide(
         db.clusters,
         db.pending_resources,
         cluster_id,
         user,
+        ip_address,
         outbound,
         data,
       )
     }
 
-    mist.Text("/upgrade"), Authorized(user:, ..) -> engine.upgrade(user, conn)
+    mist.Text("/upgrade"), Authorized(user:, ip_address:, ..) ->
+      engine.upgrade(user, ip_address, conn)
+
+    mist.Text("/su-drop " <> data), Intervention(_) ->
+      intervention.drop_value(
+        db.users,
+        db.clusters,
+        db.pending_resources,
+        conn,
+        state,
+        data,
+      )
+
+    mist.Text("/su-clinfo " <> data), Intervention(_) ->
+      intervention.cluster_info(db.users, db.clusters, conn, state, data)
+
+    mist.Text("/su-invalidate " <> data), Intervention(_) ->
+      intervention.force_cache_invalidation(
+        db.users,
+        db.clusters,
+        conn,
+        state,
+        data,
+      )
 
     mist.Custom(ws.SendText(text)), _ -> {
       let _ = mist.send_text_frame(conn, text)
