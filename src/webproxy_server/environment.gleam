@@ -6,6 +6,7 @@ import gleam/dynamic/decode
 import gleam/int
 import gleam/json
 import gleam/result
+import gleam/string
 
 /// The TCP port the server binds to. Defaults to `8080` when unset or invalid.
 pub fn port() -> Int {
@@ -21,6 +22,21 @@ pub fn authentication_url() -> String {
     as "Please, inform a valid AUTHENTICATION_URL environment variable according to the documentation."
 
   "https://" <> url
+}
+
+/// Whether to trust the transport-level connection IP instead of the
+/// `X-Forwarded-For` / `X-Real-IP` headers. Defaults to `False`, which suits a
+/// deployment behind a reverse proxy. Set to `True` when the server faces
+/// clients directly.
+pub fn use_native_connection_ip() -> Bool {
+  case envoy.get("USE_NATIVE_CONNECTION_IP") {
+    Ok(raw) ->
+      case string.lowercase(string.trim(raw)) {
+        "true" | "1" -> True
+        _ -> False
+      }
+    Error(_) -> False
+  }
 }
 
 /// The IP addresses allowed to upgrade to intervention mode, parsed from the
