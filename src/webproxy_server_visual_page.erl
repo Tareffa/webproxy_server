@@ -264,7 +264,7 @@ html() ->
       <p id="empty" class="empty" hidden><span><strong>No live sessions</strong>Clusters appear here as clients connect.</span></p>
     </div>
     <figcaption class="figure-bar">
-      <span><strong>Live cluster topology.</strong> Largest organizations labeled.</span>
+      <span><strong>Live cluster topology.</strong> Largest organizations labeled; distant clusters drawn with fewer stars.</span>
       <span>Drag to rotate · scroll or pinch to zoom · select a cluster to follow it · Esc resets</span>
     </figcaption>
   </figure>
@@ -360,6 +360,9 @@ html() ->
   const ORBIT_GAP = 9;       // clearance between neighbouring orbits
   const ORG_MARGIN = 24;     // clearance between neighbouring organizations
   const LABELLED_ORGS = 8;   // organizations labeled in the figure, largest first
+  const STAR_AREA = 40;      // on-screen px² per drawn star; distant clusters are thinned to this
+  const LINK_PIXELS = [18, 32];  // on-screen cluster radius over which peer links fade in
+  const LINK_BUDGET = 12000; // most link segments drawn per frame, nearest clusters first
   const LABEL_HEIGHT = 32;
   const LABEL_CHAR = 6.7;    // advance of one 11px monospace character
   const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
@@ -428,7 +431,7 @@ html() ->
   controls.enableDamping = true;
   controls.dampingFactor = 0.08;
   controls.minDistance = 8;
-  controls.maxDistance = 1200;
+  controls.maxDistance = 1200;  // widened every frame to fit the layout, see frame()
 
   // Until the viewer moves the camera, it keeps everything in frame.
   let autoFit = true;
@@ -998,6 +1001,9 @@ html() ->
   const before = new THREE.Vector3();
   const spin = new THREE.Quaternion();
   const tint = new THREE.Color();
+  const projection = new THREE.Matrix4();
+  const frustum = new THREE.Frustum();
+  const bounding = new THREE.Sphere();
 
   function moveTarget(to, rate) {
     before.copy(controls.target);
@@ -1066,7 +1072,7 @@ html() ->
       view.radius += (constellationRadius(view.sessions || view.shown) - view.radius) * k(2);
       const count = Math.min(MAX_STARS, Math.ceil(Math.max(view.shown, view.sessions)));
       ensureStars(view, count);
-      if (count !== view.edgeCount) linkStars(view, count);
+      view.linkCount = count;  // links are computed lazily, once the cluster is close enough to show them
     }
 
     // Each organization's largest cluster sits at its center; the rest orbit it.
@@ -1172,12 +1178,38 @@ html() ->
       }
     }
 
-    // Stars and the peer-to-peer links between them.
+    // Stars and the peer-to-peer links between them, at a level of detail set by
+    // how big each cluster looks on screen. Clusters outside the view are
+    // skipped. Distant ones draw a thinned but evenly spread subset of their
+    // stars (the density stays proportional, so bigger clusters still look
+    // bigger). Links fade in only once a cluster is big enough on screen to
+    // read them, nearest first, within a fixed budget.
+    projection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    frustum.setFromProjectionMatrix(projection);
+    const pixelsPerUnit = host.clientHeight / 2 / Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
+    const drawn = [];
+    for (const view of clusters.values()) {
+      const shown = Math.min(view.shown, MAX_STARS);
+      if (shown <= 0 || !frustum.intersectsSphere(bounding.set(view.pos, view.radius))) continue;
+      const pixels = (view.radius / Math.max(camera.position.distanceTo(view.pos), 1)) * pixelsPerUnit;
+      const visible = Math.min(shown, Math.max(3, (Math.PI * pixels * pixels) / STAR_AREA));
+      drawn.push({ view, visible, n: Math.ceil(visible), pixels, links: 0 });
+    }
+    drawn.sort((a, b) => b.pixels - a.pixels);
+    let linkBudget = LINK_BUDGET;
     let starCount = 0;
     let linkCount = 0;
-    for (const view of clusters.values()) {
-      starCount += Math.ceil(Math.min(view.shown, MAX_STARS));
+    for (const item of drawn) {
+      starCount += item.n;
+      const level = THREE.MathUtils.smoothstep(item.pixels, LINK_PIXELS[0], LINK_PIXELS[1]);
+      if (level <= 0 || linkBudget <= 0) continue;
+      const view = item.view;
+      if (view.edgeCount !== view.linkCount) linkStars(view, view.linkCount);
+      const segments = view.edges.length / 2;
+      if (segments > linkBudget) continue;
+      linkBudget -= segments;
       linkCount += view.edges.length;
+      item.links = level;
     }
     stars = grow(stars, starCount, buildStars);
     links = grow(links, linkCount, buildLinks);
@@ -1187,9 +1219,7 @@ html() ->
     const lCol = links.geometry.attributes.color.array;
     let si = 0;
     let li = 0;
-    for (const view of clusters.values()) {
-      const visible = Math.min(view.shown, MAX_STARS);
-      const n = Math.ceil(visible);
+    for (const { view, visible, n, links: linkLevel } of drawn) {
       spin.setFromAxisAngle(view.spinAxis, view.spin);
       for (let i = 0; i < n; i++) {
         const star = view.stars[i];
@@ -1202,8 +1232,9 @@ html() ->
         sCol.set([star.color.r * b, star.color.g * b, star.color.b * b], si * 3);
         si++;
       }
+      if (linkLevel <= 0) continue;
       tint.copy(palette.link).lerp(palette.accent, view.accent);
-      const strength = view.level * (view.edgeCount <= FULL_MESH ? 1 : 0.75);
+      const strength = linkLevel * view.level * (view.edgeCount <= FULL_MESH ? 1 : 0.75);
       for (let e = 0; e < view.edges.length; e += 2) {
         const a = view.edges[e];
         const b = view.edges[e + 1];
@@ -1236,19 +1267,33 @@ html() ->
       }
     }
 
+    // How far back the camera must stand to frame the whole layout from its
+    // current angle.
+    offset.subVectors(camera.position, controls.target).normalize();
+    const elevation = Math.asin(THREE.MathUtils.clamp(Math.abs(offset.y), 0, 1));
+    const halfHeight = fitRadius * Math.sin(elevation) + 12 * Math.cos(elevation);
+    const vertical = THREE.MathUtils.degToRad(camera.fov) / 2;
+    const horizontal = Math.atan(Math.tan(vertical) * camera.aspect);
+    const wholeView = Math.max(30, Math.max(fitRadius / Math.tan(horizontal), halfHeight / Math.tan(vertical)) * 1.12 + 10);
+
     // Camera: follow the focused cluster, or keep every organization in frame.
     if (focus) {
       moveTarget(focus.pos, k(4));
       if (focusArriving && easeDistance(Math.max(20, focus.radius * 4 + 10), k(2)) < 0.02) focusArriving = false;
     } else if (autoFit) {
       moveTarget(middle, k(2));
-      offset.subVectors(camera.position, controls.target).normalize();
-      const elevation = Math.asin(THREE.MathUtils.clamp(Math.abs(offset.y), 0, 1));
-      const halfHeight = fitRadius * Math.sin(elevation) + 12 * Math.cos(elevation);
-      const vertical = THREE.MathUtils.degToRad(camera.fov) / 2;
-      const horizontal = Math.atan(Math.tan(vertical) * camera.aspect);
-      const fit = Math.max(fitRadius / Math.tan(horizontal), halfHeight / Math.tan(vertical));
-      easeDistance(Math.max(30, fit * 1.12 + 10), k(1.5));
+      easeDistance(wholeView, k(1.5));
+    }
+
+    // Zooming out always reaches the whole layout with room to spare, wherever
+    // the camera is aimed (also while following a cluster), and never pulls a
+    // viewer in who is already further out. The far plane follows along.
+    const reach = (wholeView + controls.target.distanceTo(middle)) * 2;
+    controls.maxDistance = Math.max(reach, camera.position.distanceTo(controls.target));
+    const far = Math.max(6000, controls.maxDistance + fitRadius * 2 + 4000);
+    if (Math.abs(camera.far - far) > camera.far * 0.1) {
+      camera.far = far;
+      camera.updateProjectionMatrix();
     }
     controls.update();
     backdrop.position.copy(camera.position);

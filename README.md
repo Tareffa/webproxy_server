@@ -97,6 +97,8 @@ If you need a different grouping rule, update the cluster id generation in `src/
 
 Clusters with up to 12 sessions show every peer link. Larger ones link each session to its 3 nearest peers plus one distant peer, so the web stays readable. Past 240 sessions, each star stands for several sessions; the table and tooltip always show exact counts.
 
+To stay smooth with thousands of sessions, the figure is drawn by level of detail. Clusters outside the view are skipped. Distant clusters show an evenly thinned set of stars and no links, and full detail returns as you zoom in. Zooming out can always reach the whole layout, however large it grows.
+
 Both endpoints are public, so the snapshot never includes IP addresses, user ids, display names or raw organization ids. Cluster and organization ids are replaced by an HMAC under a random key generated at boot. The ids stay stable while the server runs, but they can't be traced back, and they change on every restart.
 
 ```json
