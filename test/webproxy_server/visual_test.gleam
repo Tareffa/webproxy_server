@@ -148,7 +148,8 @@ pub fn page_endpoint_test() {
   // data endpoint relative to its own path.
   let html = body_text(response.body)
   assert string.starts_with(html, "<!doctype html>")
-  assert string.contains(html, "WebProxy · Live clusters")
+  assert string.contains(html, "<title>WebProxy Clusters</title>")
+  assert string.contains(html, "Connecting…")
   assert string.contains(html, "+ '/data'")
   assert string.ends_with(html, "</html>")
 }

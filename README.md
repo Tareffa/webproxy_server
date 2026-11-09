@@ -93,7 +93,7 @@ If you need a different grouping rule, update the cluster id generation in `src/
 
 ### Cluster Visualization
 
-`/info/visual` is a self-contained page that draws every cluster as a glowing node, colored by organization, with its live sessions orbiting it. Clusters from the same organization are grouped together, and the page polls `/info/visual/data` every 2 seconds, animating clusters and sessions in and out as they change. Hover a cluster for its details, click it to follow it, and press `Esc` to reset the view.
+`/info/visual` is a self-contained page that draws each cluster as a column of dots on a ground grid, one dot per live session. Columns of the same organization stand on a shared ring. A side table lists every cluster by session count. The page polls `/info/visual/data` every 2 seconds and grows or shrinks the columns as sessions change. Hover a column or a table row to highlight its organization, select one to focus it, and press `Esc` to reset the view. The page follows the system's light or dark preference.
 
 Both endpoints are public, so the snapshot never includes IP addresses, user ids, display names or raw organization ids. Cluster and organization ids are replaced by an HMAC under a random key generated at boot. The ids stay stable while the server runs, but they can't be traced back, and they change on every restart.
 
