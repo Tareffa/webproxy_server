@@ -202,6 +202,43 @@ html() ->
     text-align: left;
   }
   .rows th.num { text-align: right; }
+  .rows th[aria-sort="ascending"], .rows th[aria-sort="descending"] { color: var(--ink); }
+
+  .sort {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+  }
+  .sort:hover { background: none; color: var(--ink); }
+  .sort svg { width: 10px; height: 10px; opacity: 0.35; transition: transform 120ms ease-out; }
+  th[aria-sort="ascending"] .sort svg, th[aria-sort="descending"] .sort svg { opacity: 1; }
+  th[aria-sort="ascending"] .sort svg { transform: rotate(180deg); }
+
+  .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+  .sort-note { margin: 0 0 6px; color: var(--ink-3); font-size: 12px; text-align: right; }
+
+  .credit {
+    flex: none;
+    margin: 0 -20px;
+    padding: 10px 20px 12px;
+    border-top: 1px solid var(--border);
+    color: var(--ink-3);
+    font-size: 12px;
+  }
+  .credit a {
+    color: var(--ink-2);
+    text-decoration: underline;
+    text-decoration-color: var(--ink-3);
+    text-underline-offset: 2px;
+  }
+  .credit a:hover { color: var(--ink); text-decoration-color: var(--ink); }
   .id { font-family: var(--mono); font-size: 12px; color: var(--ink-2); }
   .rows tbody tr { cursor: pointer; }
   .rows tbody tr:hover, .rows tbody tr.is-active { background: var(--wash); }
@@ -269,18 +306,34 @@ html() ->
     </section>
 
     <section class="sheet clusters" aria-labelledby="h-clusters">
-      <h2 id="h-clusters">Clusters</h2>
+      <div class="section-head">
+        <h2 id="h-clusters">Clusters</h2>
+        <p id="sort-note" class="sort-note" aria-live="polite"></p>
+      </div>
       <div class="table-wrap">
         <table class="rows">
-          <caption>Clusters by live sessions</caption>
+          <caption id="rows-caption">Clusters</caption>
           <thead>
-            <tr><th scope="col">Cluster</th><th scope="col">Organization</th><th scope="col" class="num">Sessions</th></tr>
+            <tr>
+              <th scope="col" data-sort="cluster" aria-sort="descending">
+                <button type="button" class="sort" data-key="cluster" title="Sort by cluster sessions">Cluster<svg viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.4"/></svg></button>
+              </th>
+              <th scope="col" data-sort="organization" aria-sort="none">
+                <button type="button" class="sort" data-key="organization" title="Sort by organization sessions">Organization<svg viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.4"/></svg></button>
+              </th>
+              <th scope="col" class="num">Sessions</th>
+              <th scope="col" class="num" title="Sessions across the whole organization">Org. total</th>
+            </tr>
           </thead>
           <tbody id="rows"></tbody>
         </table>
         <p id="no-rows" class="no-rows" hidden>No clusters.</p>
       </div>
     </section>
+
+    <footer class="credit">
+      Maintained by <a href="https://rhm.dev" target="_blank" rel="noopener">Rodrigo Heinzen de Moraes</a>, <span id="years">2025</span>
+    </footer>
   </aside>
 </main>
 
@@ -689,12 +742,47 @@ html() ->
 
   const rows = new Map();
   let rowHovered = null;
+  let lastList = [];
+
+  // The table sorts by the sessions of either the cluster or its whole
+  // organization, in either direction. The choice is remembered per viewer.
+  const SORT_STORAGE = 'webproxy-visual-sort';
+  const sort = { key: 'cluster', dir: 'desc' };
+  try {
+    const saved = JSON.parse(localStorage.getItem(SORT_STORAGE) ?? 'null');
+    if (saved && ['cluster', 'organization'].includes(saved.key) && ['asc', 'desc'].includes(saved.dir)) {
+      Object.assign(sort, saved);
+    }
+  } catch (err) { /* storage unavailable: keep the default */ }
+
+  function showSort() {
+    for (const th of document.querySelectorAll('th[data-sort]')) {
+      th.setAttribute('aria-sort', th.dataset.sort !== sort.key ? 'none' : sort.dir === 'asc' ? 'ascending' : 'descending');
+    }
+    const text = `By ${sort.key} sessions, ${sort.dir === 'desc' ? 'highest' : 'lowest'} first`;
+    $('sort-note').textContent = text;
+    $('rows-caption').textContent = `Clusters, sorted ${text.toLowerCase()}`;
+  }
+
+  for (const button of document.querySelectorAll('.sort')) {
+    button.addEventListener('click', () => {
+      if (sort.key === button.dataset.key) sort.dir = sort.dir === 'desc' ? 'asc' : 'desc';
+      else Object.assign(sort, { key: button.dataset.key, dir: 'desc' });
+      try { localStorage.setItem(SORT_STORAGE, JSON.stringify(sort)); } catch (err) { /* not persisted */ }
+      showSort();
+      renderTable();
+    });
+  }
+  showSort();
+
+  const year = new Date().getFullYear();
+  $('years').textContent = year > 2025 ? `2025–${year}` : '2025';
 
   function makeRow(key) {
     const tr = document.createElement('tr');
     tr.dataset.key = key;
     tr.tabIndex = 0;
-    tr.innerHTML = '<td class="id"></td><td class="id"></td><td class="num"></td>';
+    tr.innerHTML = '<td class="id"></td><td class="id"></td><td class="num"></td><td class="num"></td>';
     const enter = () => { rowHovered = key; };
     const leave = () => { if (rowHovered === key) rowHovered = null; };
     tr.addEventListener('mouseenter', enter);
@@ -712,8 +800,18 @@ html() ->
     return tr;
   }
 
-  function renderTable(list) {
-    const sorted = [...list].sort((a, b) => b.sessions - a.sessions || a.id.localeCompare(b.id));
+  function renderTable(list = lastList) {
+    lastList = list;
+    const orgTotals = new Map();
+    for (const c of list) orgTotals.set(c.organization, (orgTotals.get(c.organization) ?? 0) + c.sessions);
+    const sign = sort.dir === 'asc' ? 1 : -1;
+    const byCluster = (a, b) => sign * (a.sessions - b.sessions) || a.id.localeCompare(b.id);
+    // Sorting by organization keeps each organization's clusters together.
+    const byOrganization = (a, b) =>
+      sign * (orgTotals.get(a.organization) - orgTotals.get(b.organization))
+      || a.organization.localeCompare(b.organization)
+      || byCluster(a, b);
+    const sorted = [...list].sort(sort.key === 'organization' ? byOrganization : byCluster);
     const keep = new Set(sorted.map((c) => c.id));
     for (const [key, tr] of rows) {
       if (!keep.has(key)) { tr.remove(); rows.delete(key); if (rowHovered === key) rowHovered = null; }
@@ -723,6 +821,7 @@ html() ->
       cells[0].textContent = c.id;
       cells[1].textContent = c.organization;
       cells[2].textContent = fmt.format(c.sessions);
+      cells[3].textContent = fmt.format(orgTotals.get(c.organization));
     }
     const tbody = $('rows');
     const current = [...tbody.children];

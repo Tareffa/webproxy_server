@@ -151,5 +151,9 @@ pub fn page_endpoint_test() {
   assert string.contains(html, "<title>WebProxy Clusters</title>")
   assert string.contains(html, "Connecting…")
   assert string.contains(html, "+ '/data'")
+  assert string.contains(
+    html,
+    "<a href=\"https://rhm.dev\" target=\"_blank\" rel=\"noopener\">Rodrigo Heinzen de Moraes</a>",
+  )
   assert string.ends_with(html, "</html>")
 }

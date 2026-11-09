@@ -93,7 +93,7 @@ If you need a different grouping rule, update the cluster id generation in `src/
 
 ### Cluster Visualization
 
-`/info/visual` is a self-contained page that charts the clusters as a small star map. Each live session is a star. Lines join the sessions of a cluster to show that they share cached responses peer to peer. Each organization's largest cluster sits at its center, and its smaller clusters orbit it. A side panel, laid out like a data sheet, lists the key figures, a legend and every cluster by session count. The page polls `/info/visual/data` once a minute, and again whenever the tab regains focus. Hover a cluster or a table row to highlight it, select one to follow it, and press `Esc` to reset the view.
+`/info/visual` is a self-contained page that charts the clusters as a small star map. Each live session is a star. Lines join the sessions of a cluster to show that they share cached responses peer to peer. Each organization's largest cluster sits at its center, and its smaller clusters orbit it. A side panel, laid out like a data sheet, lists the key figures, a legend and every cluster. The cluster table sorts by the sessions of each cluster or of its whole organization, in either direction, and remembers the choice in the viewer's browser. The page polls `/info/visual/data` once a minute, and again whenever the tab regains focus. Hover a cluster or a table row to highlight it, select one to follow it, and press `Esc` to reset the view.
 
 Clusters with up to 12 sessions show every peer link. Larger ones link each session to its 3 nearest peers plus one distant peer, so the web stays readable. Past 240 sessions, each star stands for several sessions; the table and tooltip always show exact counts.
 
