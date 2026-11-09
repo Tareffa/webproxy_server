@@ -95,7 +95,7 @@ pub fn cluster_report(
   let names = user_names_by_id(users)
 
   case data {
-    "" -> format_clusters(all_clusters(clusters), names)
+    "" -> format_clusters(cluster.all_clusters(clusters), names)
     "user " <> display_name ->
       format_clusters(clusters_with_user(users, clusters, display_name), names)
     cluster_id -> format_clusters(one_cluster(clusters, cluster_id), names)
@@ -194,7 +194,7 @@ fn report(count: Int, resource_name: String, scope: String) -> String {
 fn all_connections(
   clusters: database.Table(Cluster),
 ) -> List(Subject(ws.WsCommand)) {
-  all_clusters(clusters)
+  cluster.all_clusters(clusters)
   |> list.flat_map(fn(entry) {
     let #(_id, cluster) = entry
     dict.values(cluster.members)
@@ -210,7 +210,7 @@ fn user_connections(
 ) -> List(Subject(ws.WsCommand)) {
   let ids = user_ids_by_display_name(users, display_name)
 
-  all_clusters(clusters)
+  cluster.all_clusters(clusters)
   |> list.flat_map(fn(entry) {
     let #(_id, cluster) = entry
     cluster.members
@@ -229,19 +229,6 @@ fn cluster_connections(
     let #(_id, cluster) = entry
     dict.values(cluster.members)
   })
-}
-
-/// Every stored cluster, paired with its id (the table key). The identity
-/// `select_fn` compiles to a bare wildcard pattern, so every row matches.
-fn all_clusters(clusters: database.Table(Cluster)) -> List(#(String, Cluster)) {
-  let select_fn = fn(cluster: Cluster) { cluster }
-
-  let outcome = {
-    use ref <- database.transaction(clusters)
-    database.select(ref, #(select_fn))
-  }
-
-  result.unwrap(outcome, [])
 }
 
 /// A single cluster looked up by id, as a (possibly empty) list so it shares the
@@ -269,7 +256,7 @@ fn clusters_with_user(
 ) -> List(#(String, Cluster)) {
   let ids = user_ids_by_display_name(users, display_name)
 
-  all_clusters(clusters)
+  cluster.all_clusters(clusters)
   |> list.filter(fn(entry) {
     let #(_id, cluster) = entry
     list.any(ids, fn(user_id) { dict.has_key(cluster.members, user_id) })

@@ -87,7 +87,24 @@ If you need a different grouping rule, update the cluster id generation in `src/
 | Method | Path | What it does |
 | --- | --- | --- |
 | `GET` | `/health` | Returns `200` with `{"status":"UP"}` for liveness checks. |
+| `GET` | `/info/visual` | Serves a live 3D view of the clusters and their sessions. See [Cluster Visualization](#cluster-visualization). |
+| `GET` | `/info/visual/data` | Returns the anonymized snapshot that `/info/visual` polls. |
 | `GET` | `/ws` | Upgrades the connection to a websocket and starts the WebProxy protocol. |
+
+### Cluster Visualization
+
+`/info/visual` is a self-contained page that draws every cluster as a glowing node, colored by organization, with its live sessions orbiting it. Clusters from the same organization are grouped together, and the page polls `/info/visual/data` every 2 seconds, animating clusters and sessions in and out as they change. Hover a cluster for its details, click it to follow it, and press `Esc` to reset the view.
+
+Both endpoints are public, so the snapshot never includes IP addresses, user ids, display names or raw organization ids. Cluster and organization ids are replaced by an HMAC under a random key generated at boot. The ids stay stable while the server runs, but they can't be traced back, and they change on every restart.
+
+```json
+{
+  "sessionCount": 5,
+  "clusters": [{ "id": "3fa9c1d2e0", "organization": "9b8a7c6d5e", "sessions": 5 }]
+}
+```
+
+`sessions` counts a cluster's members, which are keyed by user id. The page loads [three.js](https://threejs.org) from the jsDelivr CDN, so the viewer's browser needs internet access. The HTML lives in `src/webproxy_server_visual_page.erl` as a verbatim `~B"""` string, which requires Erlang/OTP 27 or newer.
 
 ## Websocket Protocol
 

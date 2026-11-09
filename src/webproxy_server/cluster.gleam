@@ -68,6 +68,21 @@ pub fn leave_cluster(
   Nil
 }
 
+/// Every stored cluster, paired with its id (the table key). The identity
+/// `select_fn` compiles to a bare wildcard pattern, so every row matches.
+pub fn all_clusters(
+  table: database.Table(Cluster),
+) -> List(#(String, Cluster)) {
+  let select_fn = fn(cluster: Cluster) { cluster }
+
+  let outcome = {
+    use ref <- database.transaction(table)
+    database.select(ref, #(select_fn))
+  }
+
+  result.unwrap(outcome, [])
+}
+
 pub fn get_connected_peers(
   table: database.Table(Cluster),
   id: String,

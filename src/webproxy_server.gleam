@@ -1,4 +1,5 @@
 import database
+import gleam/crypto
 import gleam/erlang/process
 import gleam/int
 import gleam/io
@@ -24,6 +25,7 @@ pub fn main() -> Nil {
   let pending_resources = engine.new_pending_resources_queue()
   let assert Ok(bandwidth_counter) = ottimizza.start_counter()
   let assert Ok(hit_counter) = ottimizza.start_cache_hit_counter()
+  let anonymization_key = crypto.strong_random_bytes(32)
   let db =
     router.Database(
       users:,
@@ -31,6 +33,7 @@ pub fn main() -> Nil {
       pending_resources:,
       bandwidth_counter:,
       hit_counter:,
+      anonymization_key:,
     )
 
   let port = environment.port()

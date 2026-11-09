@@ -9,6 +9,7 @@ import webproxy_server/cluster
 import webproxy_server/engine
 import webproxy_server/intervention
 import webproxy_server/ottimizza
+import webproxy_server/visual
 import webproxy_server/web
 import webproxy_server/ws.{Authorized, Intervention, Unauthorized, Unreacheable}
 
@@ -19,6 +20,8 @@ pub type Database {
     pending_resources: database.Table(engine.PendingResource),
     bandwidth_counter: ottimizza.BandCounter,
     hit_counter: ottimizza.HitCounter,
+    /// Per-boot secret used to anonymize the ids published by `/info/visual`.
+    anonymization_key: BitArray,
   )
 }
 
@@ -36,6 +39,8 @@ pub fn handle_request(
         db.hit_counter,
       )
     ["health"] -> web.health()
+    ["info", "visual"] -> visual.page()
+    ["info", "visual", "data"] -> visual.data(db.clusters, db.anonymization_key)
     ["ws"] ->
       mist.websocket(
         request:,
