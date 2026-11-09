@@ -74,7 +74,8 @@ html() ->
     white-space: nowrap;
   }
   .tag b { display: block; font-weight: 400; color: var(--ink-2); }
-  .tag.is-active { border-left-color: var(--accent); color: var(--ink-2); }
+  .tag.is-flipped { padding: 1px 7px 1px 0; border-left: 0; border-right: 1px solid var(--ink-3); text-align: right; }
+  .tag.is-active { border-color: var(--accent); color: var(--ink-2); }
   .tag.is-active b { color: var(--ink); }
 
   .figure-bar {
@@ -356,10 +357,11 @@ html() ->
   const MAX_STARS = 240;     // per cluster; past this, each star stands for several sessions
   const FULL_MESH = 12;      // clusters up to this size link every pair of sessions
   const NEIGHBOURS = 3;      // larger ones link each session to its nearest peers, plus one far peer
-  const ORBIT_GAP = 4;       // clearance between neighbouring orbits
-  const ORG_MARGIN = 10;     // clearance between neighbouring organizations
+  const ORBIT_GAP = 9;       // clearance between neighbouring orbits
+  const ORG_MARGIN = 24;     // clearance between neighbouring organizations
   const LABELLED_ORGS = 8;   // organizations labeled in the figure, largest first
-  const LABEL_BOX = { width: 190, height: 32 };
+  const LABEL_HEIGHT = 32;
+  const LABEL_CHAR = 6.7;    // advance of one 11px monospace character
   const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
   // Works whether the page was opened as /info/visual or /info/visual/.
   const DATA_URL = location.pathname.replace(/\/+$/, '') + '/data';
@@ -444,6 +446,8 @@ html() ->
     labelRenderer.setSize(w, h);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
+    // Stars are 5px dots on a full-size figure and shrink on narrow ones.
+    starMaterial.size = THREE.MathUtils.clamp(w / 210, 3, 5) * renderer.getPixelRatio();
   }).observe(host);
 
   // ------------------------------------------------------------ scene parts
@@ -522,7 +526,7 @@ html() ->
 
   // Stars keep a constant on-screen size, like dots on a chart, whatever the zoom.
   const starMaterial = new THREE.PointsMaterial({
-    size: 6 * renderer.getPixelRatio(), sizeAttenuation: false, map: makeStarTexture(), vertexColors: true,
+    size: 5 * renderer.getPixelRatio(), sizeAttenuation: false, map: makeStarTexture(), vertexColors: true,
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
   });
   const buildStars = (geometry) => new THREE.Points(geometry, starMaterial);
@@ -554,7 +558,9 @@ html() ->
   const hitTargets = [];
   let totalSessions = 0;
 
-  const constellationRadius = (sessions) => 2.4 + 2.6 * Math.cbrt(Math.max(sessions, 1));
+  // Growing with the square root keeps the stars of a big cluster about as far
+  // apart on screen as those of a small one, instead of packing into a blob.
+  const constellationRadius = (sessions) => 3 + 1.9 * Math.sqrt(Math.max(sessions, 1));
   // Roughly Kepler: further orbits are slower.
   const orbitalSpeed = (radius) => 4 / Math.pow(Math.max(radius, 4), 1.5);
 
@@ -572,7 +578,7 @@ html() ->
       key, label,
       center: new THREE.Vector3(),
       target: new THREE.Vector3(),
-      yOffset: (rand() - 0.5) * 8,
+      yOffset: (rand() - 0.5) * 20,
       tilt: new THREE.Quaternion().setFromEuler(new THREE.Euler((rand() - 0.5) * 0.4, 0, (rand() - 0.5) * 0.4)),
       clusters: [],
       sun: null,
@@ -631,17 +637,31 @@ html() ->
     if (focus === view) focus = null;
   }
 
-  // A cluster's stars sit at fixed spots inside a slightly flattened ball.
+  // A cluster's stars sit at fixed spots inside a flattened ball, taken from a
+  // low-discrepancy (R3) sequence: evenly spread with no clumps or voids, and
+  // each new star keeps the earlier ones where they are. Each cluster shifts
+  // the sequence by its own offset, so no two clusters look alike.
+  const R3 = [0.8191725133961645, 0.6710436067037893, 0.5497004779019703];
   function ensureStars(view, count) {
+    if (!view.sequence) {
+      const rand = random(hashString(`${view.key}:sequence`));
+      view.sequence = { n: 0, shift: [rand(), rand(), rand()] };
+    }
+    const { shift } = view.sequence;
     while (view.stars.length < count) {
-      const i = view.stars.length;
-      const rand = random(hashString(`${view.key}:${i}`));
-      const y = rand() * 2 - 1;
-      const a = rand() * Math.PI * 2;
-      const s = Math.sqrt(1 - y * y);
-      const r = 0.25 + 0.75 * Math.cbrt(rand());
+      const p = new THREE.Vector3();
+      do {
+        const n = ++view.sequence.n;
+        p.set(
+          ((shift[0] + n * R3[0]) % 1) * 2 - 1,
+          ((shift[1] + n * R3[1]) % 1) * 2 - 1,
+          ((shift[2] + n * R3[2]) % 1) * 2 - 1,
+        );
+      } while (p.lengthSq() > 1);
+      p.y *= 0.6;
+      const rand = random(hashString(`${view.key}:${view.stars.length}`));
       view.stars.push({
-        p: new THREE.Vector3(s * Math.cos(a) * r, y * r * 0.7, s * Math.sin(a) * r),
+        p,
         color: palette.star.clone().lerp(rand() < 0.5 ? palette.warm : palette.cool, rand() * 0.5),
       });
     }
@@ -713,8 +733,9 @@ html() ->
       .forEach((org, rank) => {
         org.rank = rank;
         const count = list.filter((c) => c.organization === org.key).length;
-        org.label.element.querySelector('span').textContent =
-          `${fmt.format(org.sessions)} sessions · ${count} ${count === 1 ? 'cluster' : 'clusters'}`;
+        const detail = `${fmt.format(org.sessions)} sessions · ${count} ${count === 1 ? 'cluster' : 'clusters'}`;
+        org.label.element.querySelector('span').textContent = detail;
+        org.labelWidth = Math.max(org.key.length, detail.length) * LABEL_CHAR + 8;
       });
 
     totalSessions = data.sessionCount ?? list.reduce((n, c) => n + c.sessions, 0);
@@ -992,7 +1013,9 @@ html() ->
   }
 
   // Labels go to the largest organizations first (the highlighted one always
-  // wins); a label that would overlap one already placed stays hidden.
+  // wins); a label that would overlap one already placed stays hidden. A label
+  // already on screen gets a few pixels of leeway, so it does not flicker at
+  // the edge of a collision while the camera moves.
   const placed = [];
   function placeLabels(emphasis) {
     const width = host.clientWidth;
@@ -1000,6 +1023,7 @@ html() ->
     const highlighted = emphasis?.org;
     placed.length = 0;
     for (const org of orgOrder) {
+      org.wasLabelled = org.label.visible;
       org.label.visible = false;
       org.label.element.classList.toggle('is-active', org === highlighted);
     }
@@ -1012,9 +1036,19 @@ html() ->
       if (scratch.z > 1) continue;
       const x = ((scratch.x + 1) / 2) * width;
       const y = ((1 - scratch.y) / 2) * height;
-      const box = [x, y - LABEL_BOX.height, x + LABEL_BOX.width, y];
+      const labelWidth = org.labelWidth ?? 190;
+      if (y - LABEL_HEIGHT < 4 || y > height - 4) continue;
+      // Labels read to the right of their anchor, or to the left near the right edge.
+      const flipped = x + labelWidth > width - 4;
+      const pad = org.wasLabelled ? -3 : 3;
+      const box = flipped
+        ? [x - labelWidth - pad, y - LABEL_HEIGHT - pad, x + pad, y + pad]
+        : [x - pad, y - LABEL_HEIGHT - pad, x + labelWidth + pad, y + pad];
+      if (box[0] < 4) continue;
       if (placed.some((p) => box[0] < p[2] && box[2] > p[0] && box[1] < p[3] && box[3] > p[1])) continue;
       placed.push(box);
+      org.label.center.set(flipped ? 1 : 0, 1);
+      org.label.element.classList.toggle('is-flipped', flipped);
       org.label.visible = true;
     }
   }
@@ -1053,10 +1087,12 @@ html() ->
     }
 
     // Organizations sit on a sunflower spiral that gives each one room for its own
-    // size (first-seen order keeps existing ones in place), then any overlaps are
-    // pushed apart. Both steps are deterministic, so the layout holds still.
+    // size, largest nearest the middle so the figure stays balanced, then any
+    // overlaps are pushed apart. Both steps are deterministic, so the layout
+    // holds still between updates.
+    const placement = [...orgOrder].sort((a, b) => a.rank - b.rank || a.key.localeCompare(b.key));
     let area = 0;
-    orgOrder.forEach((org, i) => {
+    placement.forEach((org, i) => {
       const room = org.extent + ORG_MARGIN;
       const r = Math.sqrt(area) * 1.1;
       area += room * room;
@@ -1080,10 +1116,23 @@ html() ->
       }
     }
     let layoutRadius = 0;
+    const bounds = { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity };
     for (const org of orgOrder) {
       if (org.fresh) { org.center.copy(org.target); org.fresh = false; }
       else org.center.lerp(org.target, k(2));
       layoutRadius = Math.max(layoutRadius, Math.hypot(org.target.x, org.target.z) + org.extent);
+      bounds.minX = Math.min(bounds.minX, org.target.x - org.extent);
+      bounds.maxX = Math.max(bounds.maxX, org.target.x + org.extent);
+      bounds.minZ = Math.min(bounds.minZ, org.target.z - org.extent);
+      bounds.maxZ = Math.max(bounds.maxZ, org.target.z + org.extent);
+    }
+    // The camera frames what is actually there, not a circle around the origin.
+    const middle = orgOrder.length
+      ? new THREE.Vector3((bounds.minX + bounds.maxX) / 2, 0, (bounds.minZ + bounds.maxZ) / 2)
+      : new THREE.Vector3();
+    let fitRadius = 0;
+    for (const org of orgOrder) {
+      fitRadius = Math.max(fitRadius, Math.hypot(org.target.x - middle.x, org.target.z - middle.z) + org.extent);
     }
 
     const emphasis = hovered ?? (rowHovered && clusters.get(rowHovered)) ?? focus;
@@ -1192,14 +1241,14 @@ html() ->
       moveTarget(focus.pos, k(4));
       if (focusArriving && easeDistance(Math.max(20, focus.radius * 4 + 10), k(2)) < 0.02) focusArriving = false;
     } else if (autoFit) {
-      moveTarget(scratch.set(0, 0, 0), k(2));
+      moveTarget(middle, k(2));
       offset.subVectors(camera.position, controls.target).normalize();
       const elevation = Math.asin(THREE.MathUtils.clamp(Math.abs(offset.y), 0, 1));
-      const halfHeight = layoutRadius * Math.sin(elevation) + 12 * Math.cos(elevation);
+      const halfHeight = fitRadius * Math.sin(elevation) + 12 * Math.cos(elevation);
       const vertical = THREE.MathUtils.degToRad(camera.fov) / 2;
       const horizontal = Math.atan(Math.tan(vertical) * camera.aspect);
-      const fit = Math.max(layoutRadius / Math.tan(horizontal), halfHeight / Math.tan(vertical));
-      easeDistance(Math.max(30, fit * 1.08 + 6), k(1.5));
+      const fit = Math.max(fitRadius / Math.tan(horizontal), halfHeight / Math.tan(vertical));
+      easeDistance(Math.max(30, fit * 1.12 + 10), k(1.5));
     }
     controls.update();
     backdrop.position.copy(camera.position);
