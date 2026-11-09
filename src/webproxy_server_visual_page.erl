@@ -19,42 +19,25 @@ html() ->
 <title>WebProxy Clusters</title>
 <style>
   :root {
-    color-scheme: light;
-    --page: #f9f9f7;
-    --surface: #fcfcfb;
-    --ink: #0b0b0b;
-    --ink-2: #52514e;
-    --ink-3: #6b6a65;
-    --grid: #e1e0d9;
-    --axis: #c3c2b7;
-    --muted-mark: #cfcdc5;
-    --series: #2a78d6;
-    --series-strong: #1c5cab;
+    color-scheme: dark;
+    --space: #080b13;
+    --page: #0c1019;
+    --ink: #e8ebf2;
+    --ink-2: #b3bacb;
+    --ink-3: #8b93a7;
+    --hairline: rgba(255, 255, 255, 0.07);
+    --border: rgba(255, 255, 255, 0.11);
+    --grid: #161d2c;
+    --accent: #3987e5;
+    --wash: rgba(57, 135, 229, 0.16);
+    --star: #e9edf6;
+    --link: #55688f;
+    --orbit: #33405e;
     --good: #0ca30c;
-    --critical: #d03b3b;
-    --border: rgba(11, 11, 11, 0.1);
-    --wash: rgba(42, 120, 214, 0.08);
-    --shadow: 0 2px 8px rgba(11, 11, 11, 0.08);
+    --critical: #e66767;
+    --shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
     --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
     --mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      color-scheme: dark;
-      --page: #0d0d0d;
-      --surface: #1a1a19;
-      --ink: #f0efec;
-      --ink-2: #c3c2b7;
-      --ink-3: #9a9890;
-      --grid: #2c2c2a;
-      --axis: #4a4a47;
-      --muted-mark: #42423f;
-      --series: #3987e5;
-      --series-strong: #86b6ef;
-      --border: rgba(255, 255, 255, 0.1);
-      --wash: rgba(57, 135, 229, 0.14);
-      --shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
-    }
   }
 
   * { box-sizing: border-box; }
@@ -66,18 +49,48 @@ html() ->
     -webkit-font-smoothing: antialiased;
   }
   ::selection { background: var(--wash); color: var(--ink); }
-  :focus-visible { outline: 2px solid var(--series); outline-offset: 2px; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
   .layout {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 360px;
+    grid-template-columns: minmax(0, 1fr) 380px;
     height: 100vh;
     height: 100dvh;
   }
 
-  .viewport { position: relative; min-width: 0; background: var(--surface); }
+  /* ---- figure ---- */
+
+  .viewport { display: flex; flex-direction: column; min-width: 0; margin: 0; overflow: hidden; background: var(--space); }
+  .stage { position: relative; flex: 1; min-height: 0; }
   #scene { position: absolute; inset: 0; }
   #scene canvas { display: block; width: 100%; height: 100%; }
+  .labels { position: absolute; inset: 0; pointer-events: none; }
+
+  .tag {
+    padding: 1px 0 1px 7px;
+    border-left: 1px solid var(--ink-3);
+    font: 11px/1.35 var(--mono);
+    color: var(--ink-3);
+    white-space: nowrap;
+  }
+  .tag b { display: block; font-weight: 400; color: var(--ink-2); }
+  .tag.is-active { border-left-color: var(--accent); color: var(--ink-2); }
+  .tag.is-active b { color: var(--ink); }
+
+  .figure-bar {
+    flex: none;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 4px 16px;
+    min-height: 37px;
+    padding: 9px 16px;
+    border-top: 1px solid var(--border);
+    background: var(--page);
+    color: var(--ink-3);
+    font-size: 12px;
+  }
+  .figure-bar strong { color: var(--ink-2); font-weight: 500; }
 
   .empty {
     position: absolute;
@@ -98,11 +111,11 @@ html() ->
     left: 0;
     top: 0;
     z-index: 10;
-    min-width: 220px;
+    min-width: 240px;
     padding: 10px 12px;
-    background: var(--surface);
+    background: var(--page);
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: 4px;
     box-shadow: var(--shadow);
     pointer-events: none;
   }
@@ -111,6 +124,8 @@ html() ->
   .tooltip dt { color: var(--ink-3); }
   .tooltip dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
 
+  /* ---- data sheet ---- */
+
   .panel {
     display: flex;
     flex-direction: column;
@@ -118,66 +133,86 @@ html() ->
     padding: 20px 20px 0;
     border-left: 1px solid var(--border);
   }
-  .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-  h1 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: 0; }
+  .panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+  h1 { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: 0; }
+  .subtitle { margin: 2px 0 0; color: var(--ink-2); }
 
   button {
+    flex: none;
     font: inherit;
     font-size: 12.5px;
     color: var(--ink);
     background: transparent;
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: 4px;
     padding: 4px 10px;
     cursor: pointer;
   }
   button:hover { background: var(--wash); }
 
-  .status { display: flex; align-items: center; gap: 8px; margin: 4px 0 0; color: var(--ink-2); font-size: 12.5px; }
-  .status::before { content: ""; flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--axis); }
+  .status { display: flex; align-items: center; gap: 8px; margin: 10px 0 0; color: var(--ink-2); font-size: 12.5px; }
+  .status::before { content: ""; flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--ink-3); }
   .status[data-state="live"]::before { background: var(--good); }
   .status[data-state="down"]::before { background: var(--critical); }
 
-  .summary { margin: 18px 0 0; font-size: 14px; color: var(--ink-2); }
-  .summary strong { color: var(--ink); font-weight: 600; }
-  .caption { margin: 6px 0 0; color: var(--ink-3); font-size: 12.5px; max-width: 60ch; }
+  .sheet { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); }
+  h2 {
+    margin: 0 0 6px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
 
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  caption { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  td, th { padding: 5px 8px; border-bottom: 1px solid var(--hairline); }
+  td:first-child, th:first-child { padding-left: 0; }
+  td:last-child, th:last-child { padding-right: 0; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+
+  .spec th { color: var(--ink-2); font-weight: 400; text-align: left; }
+  .spec td { color: var(--ink); text-align: right; font-variant-numeric: tabular-nums; }
+  .spec td small { color: var(--ink-3); font-size: 12px; }
+
+  .legend { display: grid; grid-template-columns: 28px 1fr; gap: 8px 10px; margin: 8px 0 0; align-items: start; }
+  .legend dt { padding-top: 3px; line-height: 0; }
+  .legend dd { margin: 0; color: var(--ink-2); }
+  .legend dd strong { color: var(--ink); font-weight: 500; }
+  .legend svg { display: block; width: 28px; height: 14px; overflow: visible; }
+
+  .clusters { display: flex; flex-direction: column; flex: 1; min-height: 0; }
   .table-wrap {
     flex: 1;
     min-height: 0;
-    margin: 18px -20px 0;
+    margin: 0 -20px;
     padding: 0 20px 20px;
     overflow: auto;
     scrollbar-width: thin;
-    scrollbar-color: var(--axis) transparent;
+    scrollbar-color: var(--orbit) transparent;
   }
-  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
-  caption { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-  th {
+  .rows th {
     position: sticky;
     top: 0;
-    padding: 6px 8px;
     background: var(--page);
-    border-bottom: 1px solid var(--axis);
+    border-bottom: 1px solid var(--border);
     color: var(--ink-3);
     font-weight: 500;
     text-align: left;
   }
-  td { padding: 6px 8px; border-bottom: 1px solid var(--grid); }
-  th:first-child, td:first-child { padding-left: 0; }
-  th:last-child, td:last-child { padding-right: 0; }
-  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .rows th.num { text-align: right; }
   .id { font-family: var(--mono); font-size: 12px; color: var(--ink-2); }
-  tbody tr { cursor: pointer; }
-  tbody tr:hover, tbody tr.is-active { background: var(--wash); }
-  tbody tr.is-active .id:first-child { color: var(--ink); }
-  tbody tr:focus-visible { outline-offset: -2px; }
-  .no-rows { margin: 12px 0 0; color: var(--ink-3); }
+  .rows tbody tr { cursor: pointer; }
+  .rows tbody tr:hover, .rows tbody tr.is-active { background: var(--wash); }
+  .rows tbody tr.is-active .id:first-child { color: var(--ink); }
+  .rows tbody tr:focus-visible { outline-offset: -2px; }
+  .no-rows { margin: 10px 0 0; color: var(--ink-3); }
   .no-rows[hidden] { display: none; }
 
-  @media (max-width: 860px) {
-    .layout { grid-template-columns: 1fr; grid-template-rows: 58vh auto; height: auto; }
-    .viewport { min-height: 320px; }
+  @media (max-width: 900px) {
+    .layout { grid-template-columns: 1fr; grid-template-rows: 60vh auto; height: auto; }
+    .viewport { min-height: 340px; }
     .panel { border-left: 0; border-top: 1px solid var(--border); }
     .table-wrap { overflow: visible; }
   }
@@ -185,29 +220,67 @@ html() ->
 </head>
 <body>
 <main class="layout">
-  <section class="viewport" id="viewport" aria-label="3D view of the clusters">
-    <div id="scene"></div>
-    <p id="empty" class="empty" hidden><span><strong>No live sessions</strong>Clusters appear here as clients connect.</span></p>
-  </section>
+  <figure class="viewport" id="viewport" aria-label="3D view of the clusters">
+    <div class="stage">
+      <div id="scene"></div>
+      <p id="empty" class="empty" hidden><span><strong>No live sessions</strong>Clusters appear here as clients connect.</span></p>
+    </div>
+    <figcaption class="figure-bar">
+      <span><strong>Live cluster topology.</strong> Largest organizations labeled.</span>
+      <span>Drag to rotate · scroll or pinch to zoom · select a cluster to follow it · Esc resets</span>
+    </figcaption>
+  </figure>
 
   <aside class="panel" aria-labelledby="title">
-    <div class="panel-head">
-      <h1 id="title">WebProxy clusters</h1>
+    <header class="panel-head">
+      <div>
+        <h1 id="title">WebProxy clusters</h1>
+        <p class="subtitle">Peer-to-peer cache topology</p>
+      </div>
       <button id="reset" type="button" title="Reset view (Esc)">Reset view</button>
-    </div>
+    </header>
     <p id="status" class="status" role="status">Connecting…</p>
-    <p id="summary" class="summary">Waiting for data…</p>
-    <p class="caption">Each column is a cluster and each dot one live session. Columns on the same ground ring belong to the same organization. Drag to rotate, scroll or pinch to zoom, select a cluster to focus it.</p>
-    <div class="table-wrap">
-      <table>
-        <caption>Clusters by live sessions</caption>
-        <thead>
-          <tr><th scope="col">Cluster</th><th scope="col">Organization</th><th scope="col" class="num">Sessions</th></tr>
-        </thead>
-        <tbody id="rows"></tbody>
+
+    <section class="sheet" aria-labelledby="h-figures">
+      <h2 id="h-figures">Key figures</h2>
+      <table class="spec">
+        <caption>Key figures</caption>
+        <tbody>
+          <tr><th scope="row">Live sessions</th><td id="f-sessions">–</td></tr>
+          <tr><th scope="row">Clusters</th><td id="f-clusters">–</td></tr>
+          <tr><th scope="row">Organizations</th><td id="f-orgs">–</td></tr>
+          <tr><th scope="row">Largest cluster</th><td id="f-largest">–</td></tr>
+          <tr><th scope="row">Mean sessions per cluster</th><td id="f-mean">–</td></tr>
+          <tr><th scope="row">Refresh interval</th><td>60 s</td></tr>
+        </tbody>
       </table>
-      <p id="no-rows" class="no-rows" hidden>No clusters.</p>
-    </div>
+    </section>
+
+    <section class="sheet" aria-labelledby="h-legend">
+      <h2 id="h-legend">Legend</h2>
+      <dl class="legend">
+        <dt><svg viewBox="0 0 28 14" aria-hidden="true"><circle cx="14" cy="7" r="2.6" fill="var(--star)"/></svg></dt>
+        <dd><strong>Session.</strong> One live client connection.</dd>
+        <dt><svg viewBox="0 0 28 14" aria-hidden="true"><line x1="5" y1="10" x2="23" y2="4" stroke="var(--link)" stroke-width="1.2"/><circle cx="5" cy="10" r="2.2" fill="var(--star)"/><circle cx="23" cy="4" r="2.2" fill="var(--star)"/></svg></dt>
+        <dd><strong>Peer link.</strong> Sessions of one cluster share cached responses directly.</dd>
+        <dt><svg viewBox="0 0 28 14" aria-hidden="true"><ellipse cx="14" cy="7" rx="12" ry="5" fill="none" stroke="var(--ink-3)" stroke-width="1"/><circle cx="14" cy="7" r="2.2" fill="var(--star)"/><circle cx="25.4" cy="5.4" r="1.6" fill="var(--star)"/></svg></dt>
+        <dd><strong>Orbit.</strong> An organization's smaller clusters circle its largest one.</dd>
+      </dl>
+    </section>
+
+    <section class="sheet clusters" aria-labelledby="h-clusters">
+      <h2 id="h-clusters">Clusters</h2>
+      <div class="table-wrap">
+        <table class="rows">
+          <caption>Clusters by live sessions</caption>
+          <thead>
+            <tr><th scope="col">Cluster</th><th scope="col">Organization</th><th scope="col" class="num">Sessions</th></tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+        <p id="no-rows" class="no-rows" hidden>No clusters.</p>
+      </div>
+    </section>
   </aside>
 </main>
 
@@ -224,32 +297,54 @@ html() ->
 <script type="module">
   import * as THREE from 'three';
   import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+  import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 
-  const POLL_MS = 2000;
-  const HIDDEN_POLL_MS = 15000;
-  const MAX_DOTS = 150;        // per column; past this, each dot stands for several sessions
-  const BASE_STEP = 1.5;       // vertical spacing between session dots
-  const MAX_COLUMN = 48;       // height of the tallest column, in world units
-  const CLUSTER_GAP = 3.6;     // spacing between the columns of one organization
+  const POLL_MS = 60000;
+  const MAX_STARS = 240;     // per cluster; past this, each star stands for several sessions
+  const FULL_MESH = 12;      // clusters up to this size link every pair of sessions
+  const NEIGHBOURS = 3;      // larger ones link each session to its nearest peers, plus one far peer
+  const ORBIT_GAP = 4;       // clearance between neighbouring orbits
+  const ORG_MARGIN = 10;     // clearance between neighbouring organizations
+  const LABELLED_ORGS = 8;   // organizations labeled in the figure, largest first
+  const LABEL_BOX = { width: 190, height: 32 };
   const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
   // Works whether the page was opened as /info/visual or /info/visual/.
   const DATA_URL = location.pathname.replace(/\/+$/, '') + '/data';
   const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const stacked = matchMedia('(max-width: 860px)');
+  const stacked = matchMedia('(max-width: 900px)');
 
   const $ = (id) => document.getElementById(id);
   const fmt = new Intl.NumberFormat();
+  const fmt1 = new Intl.NumberFormat(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
-  // ------------------------------------------------------------------- theme
+  const css = getComputedStyle(document.documentElement);
+  const token = (name) => new THREE.Color(css.getPropertyValue(`--${name}`).trim());
+  const palette = {
+    space: token('space'),
+    grid: token('grid'),
+    star: token('star'),
+    link: token('link'),
+    orbit: token('orbit'),
+    accent: token('accent'),
+    warm: new THREE.Color('#f6e5c8'),
+    cool: new THREE.Color('#cddcff'),
+  };
 
-  const theme = {};
-  function readTheme() {
-    const css = getComputedStyle(document.documentElement);
-    for (const name of ['surface', 'grid', 'axis', 'muted-mark', 'series', 'series-strong']) {
-      theme[name] = new THREE.Color(css.getPropertyValue(`--${name}`).trim());
-    }
+  // Deterministic randomness, so a cluster's stars keep their places between updates.
+  function hashString(text) {
+    let h = 2166136261;
+    for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 16777619);
+    return h >>> 0;
   }
-  readTheme();
+  function random(seed) {
+    let a = seed >>> 0;
+    return () => {
+      a = (a + 0x6d2b79f5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
 
   // ---------------------------------------------------------------- renderer
 
@@ -264,22 +359,21 @@ html() ->
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   host.appendChild(renderer.domElement);
 
-  const scene = new THREE.Scene();
-  scene.fog = new THREE.Fog(0xffffff, 200, 600);
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x9a988f, 1.9));
-  const sun = new THREE.DirectionalLight(0xffffff, 1.3);
-  sun.position.set(40, 90, 30);
-  scene.add(sun);
+  const labelRenderer = new CSS2DRenderer();
+  labelRenderer.domElement.className = 'labels';
+  host.appendChild(labelRenderer.domElement);
 
-  const camera = new THREE.PerspectiveCamera(40, 1, 0.5, 4000);
-  camera.position.set(70, 75, 95);
+  const scene = new THREE.Scene();
+  scene.background = palette.space;
+
+  const camera = new THREE.PerspectiveCamera(42, 1, 0.5, 6000);
+  camera.position.set(60, 80, 100);
 
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
   controls.dampingFactor = 0.08;
-  controls.maxPolarAngle = Math.PI * 0.47;
   controls.minDistance = 8;
-  controls.maxDistance = 800;
+  controls.maxDistance = 1200;
 
   // Until the viewer moves the camera, it keeps everything in frame.
   let autoFit = true;
@@ -294,120 +388,144 @@ html() ->
     const { clientWidth: w, clientHeight: h } = host;
     if (!w || !h) return;
     renderer.setSize(w, h);
+    labelRenderer.setSize(w, h);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
   }).observe(host);
 
   // ------------------------------------------------------------ scene parts
 
-  // A floor bounded to the layout, with cells sized to it, reads as a plot area
-  // rather than an endless plane that aliases toward the horizon.
-  let grid = null;
-  let gridKey = '';
-  function ensureGrid(radius) {
-    const extent = radius + 12;
-    const cell = [5, 10, 20, 25, 50, 100].find((c) => (extent * 2) / c <= 16) ?? 200;
-    const size = Math.ceil((extent * 2) / cell) * cell;
-    const key = `${size}/${cell}`;
-    if (key === gridKey) return;
-    if (grid) { scene.remove(grid); grid.geometry.dispose(); grid.material.dispose(); }
-    grid = new THREE.GridHelper(size, size / cell, theme.grid, theme.grid);
-    gridKey = key;
-    scene.add(grid);
+  function makeStarTexture() {
+    const size = 64;
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+    g.addColorStop(0, 'rgba(255,255,255,1)');
+    g.addColorStop(0.3, 'rgba(255,255,255,0.9)');
+    g.addColorStop(0.55, 'rgba(255,255,255,0.12)');
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, size, size);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    return texture;
   }
 
-  const dotGeometry = new THREE.SphereGeometry(1, 16, 12);
-  const dotMaterial = new THREE.MeshLambertMaterial();
-  let dots = makeDots(512);
-  function makeDots(capacity) {
-    const mesh = new THREE.InstancedMesh(dotGeometry, dotMaterial, capacity);
-    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    mesh.setColorAt(0, theme.series);
-    mesh.count = 0;
-    mesh.frustumCulled = false;
-    scene.add(mesh);
-    return mesh;
-  }
-  function ensureDots(needed) {
-    if (needed <= dots.instanceMatrix.count) return;
-    let capacity = dots.instanceMatrix.count;
-    while (capacity < needed) capacity *= 2;
-    scene.remove(dots);
-    dots.dispose();
-    dots = makeDots(capacity);
-  }
-
-  const stemMaterial = new THREE.LineBasicMaterial({ color: theme.axis });
-  let stems = makeStems(128);
-  function makeStems(capacity) {
+  // A sparse, faint background field that travels with the camera.
+  const backdrop = (() => {
+    const count = 900;
+    const rand = random(7);
+    const positions = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) {
+      const r = 2000 + rand() * 1500;
+      const y = rand() * 2 - 1;
+      const a = rand() * Math.PI * 2;
+      const s = Math.sqrt(1 - y * y);
+      positions.set([r * s * Math.cos(a), r * y, r * s * Math.sin(a)], i * 3);
+    }
     const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(capacity * 6), 3).setUsage(THREE.DynamicDrawUsage));
-    geometry.userData.capacity = capacity;
-    const lines = new THREE.LineSegments(geometry, stemMaterial);
-    lines.frustumCulled = false;
-    scene.add(lines);
-    return lines;
-  }
-  function ensureStems(needed) {
-    let capacity = stems.geometry.userData.capacity;
-    if (needed <= capacity) return;
-    while (capacity < needed) capacity *= 2;
-    scene.remove(stems);
-    stems.geometry.dispose();
-    stems = makeStems(capacity);
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    const points = new THREE.Points(geometry, new THREE.PointsMaterial({
+      color: 0x8391b3, size: 1, sizeAttenuation: false, transparent: true, opacity: 0.25, depthWrite: false,
+    }));
+    scene.add(points);
+    return points;
+  })();
+
+  // A polar reference grid on the plane the organizations sit on, like a star chart.
+  let polar = null;
+  let polarRadius = 0;
+  function ensurePolar(radius) {
+    const wanted = Math.ceil((radius + 12) / 10) * 10;
+    if (polar && Math.abs(wanted - polarRadius) <= polarRadius * 0.15) return;
+    if (polar) { scene.remove(polar); polar.geometry.dispose(); polar.material.dispose(); }
+    const rings = THREE.MathUtils.clamp(Math.round(wanted / 30), 3, 6);
+    polar = new THREE.PolarGridHelper(wanted, 12, rings, 128, palette.grid, palette.grid);
+    polarRadius = wanted;
+    scene.add(polar);
   }
 
-  const ringGeometry = new THREE.BufferGeometry().setFromPoints(
-    Array.from({ length: 96 }, (_, i) => {
-      const a = (i / 96) * Math.PI * 2;
+  function makeDynamic(capacity, build) {
+    const geometry = new THREE.BufferGeometry();
+    for (const name of ['position', 'color']) {
+      geometry.setAttribute(name, new THREE.BufferAttribute(new Float32Array(capacity * 3), 3).setUsage(THREE.DynamicDrawUsage));
+    }
+    geometry.setDrawRange(0, 0);
+    const object = build(geometry);
+    object.userData.capacity = capacity;
+    object.frustumCulled = false;
+    scene.add(object);
+    return object;
+  }
+  function grow(object, needed, build) {
+    let capacity = object.userData.capacity;
+    if (needed <= capacity) return object;
+    while (capacity < needed) capacity *= 2;
+    scene.remove(object);
+    object.geometry.dispose();
+    return makeDynamic(capacity, build);
+  }
+
+  // Stars keep a constant on-screen size, like dots on a chart, whatever the zoom.
+  const starMaterial = new THREE.PointsMaterial({
+    size: 6 * renderer.getPixelRatio(), sizeAttenuation: false, map: makeStarTexture(), vertexColors: true,
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+  });
+  const buildStars = (geometry) => new THREE.Points(geometry, starMaterial);
+  let stars = makeDynamic(2048, buildStars);
+
+  const linkMaterial = new THREE.LineBasicMaterial({
+    vertexColors: true, transparent: true, opacity: 0.75, depthWrite: false,
+  });
+  const buildLinks = (geometry) => new THREE.LineSegments(geometry, linkMaterial);
+  let links = makeDynamic(4096, buildLinks);
+
+  const circle = new THREE.BufferGeometry().setFromPoints(
+    Array.from({ length: 160 }, (_, i) => {
+      const a = (i / 160) * Math.PI * 2;
       return new THREE.Vector3(Math.cos(a), 0, Math.sin(a));
     }),
   );
-  const ringMaterial = new THREE.LineBasicMaterial({ color: theme.axis });
-  const ringActiveMaterial = new THREE.LineBasicMaterial({ color: theme.series });
+  const orbitMaterial = new THREE.LineBasicMaterial({ color: palette.orbit });
+  const orbitActiveMaterial = new THREE.LineBasicMaterial({ color: palette.accent, transparent: true, opacity: 0.7 });
 
-  const hitGeometry = new THREE.CylinderGeometry(1, 1, 1, 12);
+  const hitGeometry = new THREE.SphereGeometry(1, 12, 8);
   const hitMaterial = new THREE.MeshBasicMaterial({ visible: false });
-
-  function applyTheme() {
-    readTheme();
-    scene.background = theme.surface;
-    scene.fog.color = theme.surface;
-    stemMaterial.color = theme.axis;
-    ringMaterial.color = theme.axis;
-    ringActiveMaterial.color = theme.series;
-    gridKey = '';
-  }
-  applyTheme();
-  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
 
   // ------------------------------------------------------------------- model
 
   const orgs = new Map();       // anonymized organization id -> org
   const orgOrder = [];          // first-seen order, so existing orgs keep their place
-  const clusters = new Map();   // anonymized cluster id -> column
+  const clusters = new Map();   // anonymized cluster id -> cluster view
   const hitTargets = [];
   let totalSessions = 0;
-  let maxSessions = 1;
-  let step = BASE_STEP;
 
-  function hash01(text) {
-    let h = 2166136261;
-    for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 16777619);
-    return (h >>> 0) / 4294967296;
-  }
+  const constellationRadius = (sessions) => 2.4 + 2.6 * Math.cbrt(Math.max(sessions, 1));
+  // Roughly Kepler: further orbits are slower.
+  const orbitalSpeed = (radius) => 4 / Math.pow(Math.max(radius, 4), 1.5);
 
   function createOrg(key) {
-    const ring = new THREE.LineLoop(ringGeometry, ringMaterial);
-    scene.add(ring);
+    const rand = random(hashString(key));
+    const el = document.createElement('div');
+    el.className = 'tag';
+    el.innerHTML = '<b></b><span></span>';
+    el.querySelector('b').textContent = key;
+    const label = new CSS2DObject(el);
+    label.center.set(0, 1);
+    label.visible = false;
+    scene.add(label);
     const org = {
-      key, ring,
+      key, label,
       center: new THREE.Vector3(),
       target: new THREE.Vector3(),
-      phase: hash01(key) * Math.PI * 2,
-      radius: 0,
-      footprint: 0,
+      yOffset: (rand() - 0.5) * 8,
+      tilt: new THREE.Quaternion().setFromEuler(new THREE.Euler((rand() - 0.5) * 0.4, 0, (rand() - 0.5) * 0.4)),
       clusters: [],
+      sun: null,
+      extent: 0,
+      sessions: 0,
+      rank: Infinity,
       dying: false,
       fresh: true,
     };
@@ -417,15 +535,29 @@ html() ->
   }
 
   function createCluster(key, org) {
+    const rand = random(hashString(key));
     const hit = new THREE.Mesh(hitGeometry, hitMaterial);
-    scene.add(hit);
+    const orbit = new THREE.LineLoop(circle, orbitMaterial);
+    orbit.visible = false;
+    scene.add(hit, orbit);
     const view = {
-      key, org, hit,
+      key, org, hit, orbit,
       sessions: 0,
       shown: 0,
-      height: 0,
+      radius: constellationRadius(1),
       pos: new THREE.Vector3(),
-      color: theme.series.clone(),
+      angle: rand() * Math.PI * 2,
+      orbitRadius: 0,
+      orbitTarget: 0,
+      spinAxis: new THREE.Vector3(rand() - 0.5, 1, rand() - 0.5).normalize(),
+      spin: rand() * Math.PI * 2,
+      spinRate: (0.02 + rand() * 0.03) * (rand() < 0.5 ? -1 : 1),
+      level: 1,
+      accent: 0,
+      stars: [],
+      world: new Float32Array(0),
+      edges: [],
+      edgeCount: -1,
       dying: false,
       fresh: true,
     };
@@ -437,12 +569,65 @@ html() ->
   }
 
   function disposeCluster(view) {
-    scene.remove(view.hit);
+    scene.remove(view.hit, view.orbit);
     hitTargets.splice(hitTargets.indexOf(view.hit), 1);
     view.org.clusters.splice(view.org.clusters.indexOf(view), 1);
+    if (view.org.sun === view) view.org.sun = null;
     clusters.delete(view.key);
     if (hovered === view) setHovered(null);
     if (focus === view) focus = null;
+  }
+
+  // A cluster's stars sit at fixed spots inside a slightly flattened ball.
+  function ensureStars(view, count) {
+    while (view.stars.length < count) {
+      const i = view.stars.length;
+      const rand = random(hashString(`${view.key}:${i}`));
+      const y = rand() * 2 - 1;
+      const a = rand() * Math.PI * 2;
+      const s = Math.sqrt(1 - y * y);
+      const r = 0.25 + 0.75 * Math.cbrt(rand());
+      view.stars.push({
+        p: new THREE.Vector3(s * Math.cos(a) * r, y * r * 0.7, s * Math.sin(a) * r),
+        color: palette.star.clone().lerp(rand() < 0.5 ? palette.warm : palette.cool, rand() * 0.5),
+      });
+    }
+    if (view.world.length < count * 3) view.world = new Float32Array(Math.max(count, 16) * 3 * 2);
+  }
+
+  // Every peer can answer every other peer's request. Small clusters show that
+  // as a full mesh; bigger ones as a web of near neighbours plus a long link each.
+  function linkStars(view, count) {
+    const edges = [];
+    if (count <= FULL_MESH) {
+      for (let i = 0; i < count; i++) for (let j = i + 1; j < count; j++) edges.push(i, j);
+    } else {
+      const seen = new Set();
+      const add = (a, b) => {
+        const lo = Math.min(a, b);
+        const hi = Math.max(a, b);
+        const key = lo * 4096 + hi;
+        if (lo === hi || seen.has(key)) return;
+        seen.add(key);
+        edges.push(lo, hi);
+      };
+      for (let i = 0; i < count; i++) {
+        const p = view.stars[i].p;
+        const best = Array.from({ length: NEIGHBOURS }, () => [Infinity, -1]);
+        for (let j = 0; j < count; j++) {
+          if (j === i) continue;
+          const d = p.distanceToSquared(view.stars[j].p);
+          if (d >= best[NEIGHBOURS - 1][0]) continue;
+          let slot = NEIGHBOURS - 1;
+          while (slot > 0 && best[slot - 1][0] > d) { best[slot] = best[slot - 1]; slot--; }
+          best[slot] = [d, j];
+        }
+        for (const [, j] of best) if (j >= 0) add(i, j);
+        add(i, Math.floor(random(hashString(`${view.key}:far:${i}`))() * count));
+      }
+    }
+    view.edges = edges;
+    view.edgeCount = count;
   }
 
   function applySnapshot(data) {
@@ -450,11 +635,13 @@ html() ->
     const seenClusters = new Set();
     const seenOrgs = new Set();
 
+    for (const org of orgs.values()) org.sessions = 0;
     for (const entry of list) {
       seenClusters.add(entry.id);
       seenOrgs.add(entry.organization);
       const org = orgs.get(entry.organization) ?? createOrg(entry.organization);
       org.dying = false;
+      org.sessions += entry.sessions;
       const view = clusters.get(entry.id) ?? createCluster(entry.id, org);
       view.dying = false;
       view.sessions = entry.sessions;
@@ -466,14 +653,25 @@ html() ->
       if (!seenOrgs.has(org.key)) org.dying = true;
     }
 
-    totalSessions = data.sessionCount ?? list.reduce((n, c) => n + c.sessions, 0);
-    maxSessions = Math.max(1, ...list.map((c) => c.sessions));
+    // Label the largest organizations.
+    [...orgs.values()]
+      .filter((org) => !org.dying)
+      .sort((a, b) => b.sessions - a.sessions || a.key.localeCompare(b.key))
+      .forEach((org, rank) => {
+        org.rank = rank;
+        const count = list.filter((c) => c.organization === org.key).length;
+        org.label.element.querySelector('span').textContent =
+          `${fmt.format(org.sessions)} sessions · ${count} ${count === 1 ? 'cluster' : 'clusters'}`;
+      });
 
-    $('summary').innerHTML = list.length
-      ? `<strong>${fmt.format(totalSessions)}</strong> ${totalSessions === 1 ? 'session' : 'sessions'} in `
-        + `<strong>${fmt.format(list.length)}</strong> ${list.length === 1 ? 'cluster' : 'clusters'} across `
-        + `<strong>${fmt.format(seenOrgs.size)}</strong> ${seenOrgs.size === 1 ? 'organization' : 'organizations'}`
-      : 'No live sessions.';
+    totalSessions = data.sessionCount ?? list.reduce((n, c) => n + c.sessions, 0);
+    const largest = list.reduce((max, c) => Math.max(max, c.sessions), 0);
+    $('f-sessions').textContent = fmt.format(totalSessions);
+    $('f-clusters').textContent = fmt.format(list.length);
+    $('f-orgs').textContent = fmt.format(seenOrgs.size);
+    $('f-largest').textContent = list.length ? `${fmt.format(largest)} sessions` : '–';
+    $('f-mean').textContent = list.length ? fmt1.format(totalSessions / list.length) : '–';
+
     if (list.length) $('empty').hidden = true;
     else showEmpty('No live sessions', 'Clusters appear here as clients connect.');
     renderTable(list);
@@ -558,7 +756,7 @@ html() ->
     } catch (err) {
       setStatus(false);
     } finally {
-      pollTimer = setTimeout(poll, document.hidden ? HIDDEN_POLL_MS : POLL_MS);
+      pollTimer = setTimeout(poll, POLL_MS);
     }
   }
   function setStatus(ok) {
@@ -566,7 +764,7 @@ html() ->
     el.dataset.state = ok ? 'live' : 'down';
     el.textContent = ok
       ? `Live, updated ${new Date().toLocaleTimeString()}`
-      : 'Connection lost, retrying';
+      : 'Connection lost, retrying in a minute';
   }
   document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
 
@@ -595,13 +793,20 @@ html() ->
   function renderTooltip(view) {
     const tip = $('tooltip');
     const share = totalSessions ? Math.round((view.sessions / totalSessions) * 100) : 0;
+    const sun = view.org.sun;
     tip.innerHTML = '<dl><dt>Cluster</dt><dd class="id"></dd><dt>Organization</dt><dd class="id"></dd>'
-      + '<dt>Live sessions</dt><dd></dd><dt>Share of sessions</dt><dd></dd></dl>';
+      + '<dt>Live sessions</dt><dd></dd><dt>Share of sessions</dt><dd></dd><dt>Orbits</dt><dd></dd></dl>';
     const values = tip.querySelectorAll('dd');
     values[0].textContent = view.key;
     values[1].textContent = view.org.key;
     values[2].textContent = fmt.format(view.sessions);
     values[3].textContent = `${share}%`;
+    if (!sun || sun === view) {
+      values[4].textContent = 'None, largest of its organization';
+    } else {
+      values[4].textContent = sun.key;
+      values[4].className = 'id';
+    }
     tip.hidden = false;
     positionTooltip();
   }
@@ -671,9 +876,8 @@ html() ->
   const scratch = new THREE.Vector3();
   const offset = new THREE.Vector3();
   const before = new THREE.Vector3();
-  const matrix = new THREE.Matrix4();
-  const dotScale = new THREE.Vector3();
-  const noRotation = new THREE.Quaternion();
+  const spin = new THREE.Quaternion();
+  const tint = new THREE.Color();
 
   function moveTarget(to, rate) {
     before.copy(controls.target);
@@ -688,139 +892,224 @@ html() ->
     return Math.abs(wanted - distance) / wanted;
   }
 
+  // Labels go to the largest organizations first (the highlighted one always
+  // wins); a label that would overlap one already placed stays hidden.
+  const placed = [];
+  function placeLabels(emphasis) {
+    const width = host.clientWidth;
+    const height = host.clientHeight;
+    const highlighted = emphasis?.org;
+    placed.length = 0;
+    for (const org of orgOrder) {
+      org.label.visible = false;
+      org.label.element.classList.toggle('is-active', org === highlighted);
+    }
+    const candidates = orgOrder
+      .filter((org) => !org.dying && org.clusters.length > 0 && (org.rank < LABELLED_ORGS || org === highlighted))
+      .sort((a, b) => (b === highlighted) - (a === highlighted) || a.rank - b.rank);
+    for (const org of candidates) {
+      org.label.position.set(org.center.x, org.center.y + (org.sun ? org.sun.radius : 2) + 1.5, org.center.z);
+      scratch.copy(org.label.position).project(camera);
+      if (scratch.z > 1) continue;
+      const x = ((scratch.x + 1) / 2) * width;
+      const y = ((1 - scratch.y) / 2) * height;
+      const box = [x, y - LABEL_BOX.height, x + LABEL_BOX.width, y];
+      if (placed.some((p) => box[0] < p[2] && box[2] > p[0] && box[1] < p[3] && box[3] > p[1])) continue;
+      placed.push(box);
+      org.label.visible = true;
+    }
+  }
+
   function frame() {
     const dt = Math.min(clock.getDelta(), 0.1);
     const k = (rate) => (reducedMotion ? 1 : 1 - Math.exp(-dt * rate));
+    const motion = reducedMotion ? 0 : dt;
 
-    // One vertical scale for every column, so heights stay comparable.
-    step += (Math.min(BASE_STEP, MAX_COLUMN / maxSessions) - step) * k(3);
-
-    let maxHeight = 0;
+    // Constellations grow and shrink with their session counts.
     for (const view of clusters.values()) {
-      view.shown += (view.sessions - view.shown) * k(4);
-      if (Math.abs(view.sessions - view.shown) < 0.01) view.shown = view.sessions;
-      view.height = view.shown * step;
-      maxHeight = Math.max(maxHeight, view.height);
+      const target = view.dying ? 0 : view.sessions;
+      view.shown += (target - view.shown) * k(3);
+      if (Math.abs(target - view.shown) < 0.01) view.shown = target;
+      view.radius += (constellationRadius(view.sessions || view.shown) - view.radius) * k(2);
+      const count = Math.min(MAX_STARS, Math.ceil(Math.max(view.shown, view.sessions)));
+      ensureStars(view, count);
+      if (count !== view.edgeCount) linkStars(view, count);
     }
 
-    // Each organization stands its columns on a ring sized to fit them.
-    let maxFootprint = 0;
+    // Each organization's largest cluster sits at its center; the rest orbit it.
     for (const org of orgOrder) {
-      const m = org.clusters.length;
-      const radius = m <= 1 ? 0 : Math.max(CLUSTER_GAP, (m * CLUSTER_GAP) / (2 * Math.PI));
-      org.radius += (radius - org.radius) * k(3);
-      org.footprint = org.radius + 2.6;
-      maxFootprint = Math.max(maxFootprint, org.footprint);
+      let sun = org.sun && !org.sun.dying ? org.sun : null;
+      for (const view of org.clusters) {
+        if (!view.dying && (!sun || view.sessions > sun.sessions)) sun = view;
+      }
+      org.sun = sun ?? org.clusters[0] ?? null;
+      let r = (org.sun ? org.sun.radius : 0) + ORBIT_GAP;
+      for (const view of org.clusters) {
+        if (view === org.sun) { view.orbitTarget = 0; continue; }
+        r += view.radius;
+        view.orbitTarget = r;
+        r += view.radius + ORBIT_GAP;
+      }
+      org.extent = org.clusters.length > 1 ? r - ORBIT_GAP : (org.sun?.radius ?? 0);
     }
 
-    // Organizations sit on a sunflower spiral; first-seen order keeps existing ones in place.
-    const spacing = Math.max(10, maxFootprint * 1.3 + 3);
+    // Organizations sit on a sunflower spiral that gives each one room for its own
+    // size (first-seen order keeps existing ones in place), then any overlaps are
+    // pushed apart. Both steps are deterministic, so the layout holds still.
+    let area = 0;
     orgOrder.forEach((org, i) => {
-      const r = spacing * Math.sqrt(i);
+      const room = org.extent + ORG_MARGIN;
+      const r = Math.sqrt(area) * 1.1;
+      area += room * room;
       const a = i * GOLDEN_ANGLE;
-      org.target.set(Math.cos(a) * r, 0, Math.sin(a) * r);
-      if (org.fresh) { org.center.copy(org.target); org.fresh = false; }
-      else org.center.lerp(org.target, k(2.5));
+      org.target.set(Math.cos(a) * r, i === 0 ? 0 : org.yOffset, Math.sin(a) * r);
     });
+    for (let pass = 0; pass < 8; pass++) {
+      for (let i = 0; i < orgOrder.length; i++) {
+        for (let j = i + 1; j < orgOrder.length; j++) {
+          const a = orgOrder[i].target;
+          const b = orgOrder[j].target;
+          const dx = b.x - a.x;
+          const dz = b.z - a.z;
+          const d = Math.hypot(dx, dz) || 0.001;
+          const needed = orgOrder[i].extent + orgOrder[j].extent + ORG_MARGIN;
+          if (d >= needed) continue;
+          const push = (needed - d) / 2 / d;
+          a.x -= dx * push; a.z -= dz * push;
+          b.x += dx * push; b.z += dz * push;
+        }
+      }
+    }
+    let layoutRadius = 0;
+    for (const org of orgOrder) {
+      if (org.fresh) { org.center.copy(org.target); org.fresh = false; }
+      else org.center.lerp(org.target, k(2));
+      layoutRadius = Math.max(layoutRadius, Math.hypot(org.target.x, org.target.z) + org.extent);
+    }
 
     const emphasis = hovered ?? (rowHovered && clusters.get(rowHovered)) ?? focus;
     markActiveRow(emphasis);
 
+    placeLabels(emphasis);
+
     for (const org of orgOrder) {
-      const m = org.clusters.length;
-      org.ring.position.set(org.center.x, 0.02, org.center.z);
-      org.ring.scale.setScalar(org.footprint);
-      org.ring.material = emphasis && emphasis.org === org ? ringActiveMaterial : ringMaterial;
-      org.clusters.forEach((view, idx) => {
-        if (m <= 1) {
+      const active = Boolean(emphasis && emphasis.org === org);
+
+      for (const view of org.clusters) {
+        if (view === org.sun) {
           scratch.copy(org.center);
+          view.orbit.visible = false;
         } else {
-          const a = org.phase + (idx / m) * Math.PI * 2;
-          scratch.set(org.center.x + Math.cos(a) * org.radius, 0, org.center.z + Math.sin(a) * org.radius);
+          if (view.fresh) view.orbitRadius = view.orbitTarget;
+          view.orbitRadius += (view.orbitTarget - view.orbitRadius) * k(2);
+          view.angle += motion * orbitalSpeed(view.orbitRadius);
+          scratch.set(Math.cos(view.angle) * view.orbitRadius, 0, Math.sin(view.angle) * view.orbitRadius)
+            .applyQuaternion(org.tilt)
+            .add(org.center);
+          view.orbit.visible = true;
+          view.orbit.position.copy(org.center);
+          view.orbit.quaternion.copy(org.tilt);
+          view.orbit.scale.setScalar(Math.max(view.orbitRadius, 0.01));
+          view.orbit.material = active ? orbitActiveMaterial : orbitMaterial;
         }
         if (view.fresh) { view.pos.copy(scratch); view.fresh = false; }
-        else view.pos.lerp(scratch, k(3));
+        else view.pos.lerp(scratch, k(4));
+        view.spin += motion * view.spinRate;
 
-        const color = !emphasis ? theme.series
-          : view === emphasis ? theme['series-strong']
-          : view.org === emphasis.org ? theme.series
-          : theme['muted-mark'];
-        view.color.lerp(color, k(12));
+        view.level += ((!emphasis || view === emphasis ? 1 : active ? 0.75 : 0.25) - view.level) * k(8);
+        view.accent += ((view === emphasis ? 1 : active ? 0.4 : 0) - view.accent) * k(8);
 
-        view.hit.position.set(view.pos.x, (view.height + 2) / 2, view.pos.z);
-        view.hit.scale.set(1.8, view.height + 2, 1.8);
-      });
-    }
-
-    // Session dots: one per session up to MAX_DOTS, evenly spaced up the column.
-    let needed = 0;
-    for (const view of clusters.values()) needed += Math.ceil(Math.min(view.shown, MAX_DOTS));
-    ensureDots(needed);
-    ensureStems(clusters.size);
-    const stemPositions = stems.geometry.attributes.position.array;
-    let di = 0;
-    let si = 0;
-    for (const view of clusters.values()) {
-      const count = Math.min(view.shown, MAX_DOTS);
-      const gap = count > 0 ? view.height / count : step;
-      const radius = THREE.MathUtils.clamp(gap * 0.36, 0.3, 0.55);
-      for (let i = 0; i < Math.ceil(count); i++) {
-        const grow = Math.min(1, count - i);
-        dotScale.setScalar(radius * grow);
-        scratch.set(view.pos.x, gap * (i + 0.5), view.pos.z);
-        dots.setMatrixAt(di, matrix.compose(scratch, noRotation, dotScale));
-        dots.setColorAt(di, view.color);
-        di++;
+        view.hit.position.copy(view.pos);
+        view.hit.scale.setScalar(view.radius + 1.5);
       }
-      stemPositions.set([view.pos.x, 0, view.pos.z, view.pos.x, Math.max(view.height, 0.6), view.pos.z], si * 6);
-      si++;
     }
-    dots.count = di;
-    dots.instanceMatrix.needsUpdate = true;
-    if (dots.instanceColor) dots.instanceColor.needsUpdate = true;
-    stems.geometry.setDrawRange(0, si * 2);
-    stems.geometry.attributes.position.needsUpdate = true;
 
-    // Retire columns and organizations that have finished shrinking away.
+    // Stars and the peer-to-peer links between them.
+    let starCount = 0;
+    let linkCount = 0;
+    for (const view of clusters.values()) {
+      starCount += Math.ceil(Math.min(view.shown, MAX_STARS));
+      linkCount += view.edges.length;
+    }
+    stars = grow(stars, starCount, buildStars);
+    links = grow(links, linkCount, buildLinks);
+    const sPos = stars.geometry.attributes.position.array;
+    const sCol = stars.geometry.attributes.color.array;
+    const lPos = links.geometry.attributes.position.array;
+    const lCol = links.geometry.attributes.color.array;
+    let si = 0;
+    let li = 0;
+    for (const view of clusters.values()) {
+      const visible = Math.min(view.shown, MAX_STARS);
+      const n = Math.ceil(visible);
+      spin.setFromAxisAngle(view.spinAxis, view.spin);
+      for (let i = 0; i < n; i++) {
+        const star = view.stars[i];
+        scratch.copy(star.p).multiplyScalar(view.radius).applyQuaternion(spin).add(view.pos);
+        view.world[i * 3] = scratch.x;
+        view.world[i * 3 + 1] = scratch.y;
+        view.world[i * 3 + 2] = scratch.z;
+        const b = Math.min(1, visible - i) * view.level;
+        sPos.set([scratch.x, scratch.y, scratch.z], si * 3);
+        sCol.set([star.color.r * b, star.color.g * b, star.color.b * b], si * 3);
+        si++;
+      }
+      tint.copy(palette.link).lerp(palette.accent, view.accent);
+      const strength = view.level * (view.edgeCount <= FULL_MESH ? 1 : 0.75);
+      for (let e = 0; e < view.edges.length; e += 2) {
+        const a = view.edges[e];
+        const b = view.edges[e + 1];
+        if (a >= n || b >= n) continue;
+        const alpha = Math.min(1, visible - a, visible - b) * strength;
+        for (const index of [a, b]) {
+          lPos.set([view.world[index * 3], view.world[index * 3 + 1], view.world[index * 3 + 2]], li * 3);
+          lCol.set([tint.r * alpha, tint.g * alpha, tint.b * alpha], li * 3);
+          li++;
+        }
+      }
+    }
+    stars.geometry.setDrawRange(0, si);
+    stars.geometry.attributes.position.needsUpdate = true;
+    stars.geometry.attributes.color.needsUpdate = true;
+    links.geometry.setDrawRange(0, li);
+    links.geometry.attributes.position.needsUpdate = true;
+    links.geometry.attributes.color.needsUpdate = true;
+
+    // Retire clusters and organizations that have faded out.
     for (const view of [...clusters.values()]) {
       if (view.dying && view.shown < 0.02) disposeCluster(view);
     }
     for (let i = orgOrder.length - 1; i >= 0; i--) {
       const org = orgOrder[i];
       if (org.dying && org.clusters.length === 0) {
-        scene.remove(org.ring);
+        scene.remove(org.label);
         orgOrder.splice(i, 1);
         orgs.delete(org.key);
       }
     }
 
-    // Camera: follow the focused column, or keep the whole layout framed.
-    const layoutRadius = spacing * Math.sqrt(Math.max(orgOrder.length - 1, 0)) + maxFootprint;
+    // Camera: follow the focused cluster, or keep every organization in frame.
     if (focus) {
-      moveTarget(scratch.set(focus.pos.x, focus.height / 2, focus.pos.z), k(4));
-      if (focusArriving && easeDistance(Math.max(24, focus.height * 1.4 + 18), k(2)) < 0.02) focusArriving = false;
+      moveTarget(focus.pos, k(4));
+      if (focusArriving && easeDistance(Math.max(20, focus.radius * 4 + 10), k(2)) < 0.02) focusArriving = false;
     } else if (autoFit) {
-      moveTarget(scratch.set(0, maxHeight * 0.4, 0), k(2));
-      // Project the layout as seen from the current elevation: the floor's depth
-      // foreshortens, the columns' height does not.
+      moveTarget(scratch.set(0, 0, 0), k(2));
       offset.subVectors(camera.position, controls.target).normalize();
-      const elevation = Math.asin(THREE.MathUtils.clamp(offset.y, 0, 1));
-      const halfHeight = (maxHeight * Math.cos(elevation) + 2 * layoutRadius * Math.sin(elevation)) / 2;
+      const elevation = Math.asin(THREE.MathUtils.clamp(Math.abs(offset.y), 0, 1));
+      const halfHeight = layoutRadius * Math.sin(elevation) + 12 * Math.cos(elevation);
       const vertical = THREE.MathUtils.degToRad(camera.fov) / 2;
       const horizontal = Math.atan(Math.tan(vertical) * camera.aspect);
       const fit = Math.max(layoutRadius / Math.tan(horizontal), halfHeight / Math.tan(vertical));
-      easeDistance(Math.max(30, fit * 1.12 + 6), k(1.5));
+      easeDistance(Math.max(30, fit * 1.08 + 6), k(1.5));
     }
     controls.update();
-
-    const distance = camera.position.distanceTo(controls.target);
-    scene.fog.near = distance * 1.2;
-    scene.fog.far = distance * 3.2;
-    ensureGrid(layoutRadius);
+    backdrop.position.copy(camera.position);
+    ensurePolar(layoutRadius);
 
     if (pointerInside && !pointerDown) setHovered(pick());
 
     renderer.render(scene, camera);
+    labelRenderer.render(scene, camera);
   }
 
   renderer.setAnimationLoop(frame);

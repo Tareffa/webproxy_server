@@ -93,7 +93,9 @@ If you need a different grouping rule, update the cluster id generation in `src/
 
 ### Cluster Visualization
 
-`/info/visual` is a self-contained page that draws each cluster as a column of dots on a ground grid, one dot per live session. Columns of the same organization stand on a shared ring. A side table lists every cluster by session count. The page polls `/info/visual/data` every 2 seconds and grows or shrinks the columns as sessions change. Hover a column or a table row to highlight its organization, select one to focus it, and press `Esc` to reset the view. The page follows the system's light or dark preference.
+`/info/visual` is a self-contained page that charts the clusters as a small star map. Each live session is a star. Lines join the sessions of a cluster to show that they share cached responses peer to peer. Each organization's largest cluster sits at its center, and its smaller clusters orbit it. A side panel, laid out like a data sheet, lists the key figures, a legend and every cluster by session count. The page polls `/info/visual/data` once a minute, and again whenever the tab regains focus. Hover a cluster or a table row to highlight it, select one to follow it, and press `Esc` to reset the view.
+
+Clusters with up to 12 sessions show every peer link. Larger ones link each session to its 3 nearest peers plus one distant peer, so the web stays readable. Past 240 sessions, each star stands for several sessions; the table and tooltip always show exact counts.
 
 Both endpoints are public, so the snapshot never includes IP addresses, user ids, display names or raw organization ids. Cluster and organization ids are replaced by an HMAC under a random key generated at boot. The ids stay stable while the server runs, but they can't be traced back, and they change on every restart.
 
