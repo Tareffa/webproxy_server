@@ -1,0 +1,14 @@
+@startuml
+title Request Handling Sequence Diagram
+
+participant Client
+participant WebProxyServer as Server
+participant RouteHandler
+participant ResponseGenerator
+
+Client ->> Server: HTTP Request
+Server ->> RouteHandler: Match Route Pattern
+RouteHandler ->> ResponseGenerator: Generate Response
+ResponseGenerator ->> Server: HTTP Response
+Server ->> Client: Send Response
+@enduml

@@ -1,0 +1,88 @@
+import ./auth
+import ./database
+
+// A cluster groups every connection that resolves to the same
+// `(organization_id, ip_address)` pair. The pair is kept alongside the members
+// so it can be reported even though the cluster id itself is a one-way hash.
+type Cluster {
+	id: Str
+	organizationId: Str
+	ipAddress: Str
+}
+
+// A user's live connection inside a cluster.
+type Member {
+	userId: Str
+	connId: Str
+}
+
+query insertCluster(id: Str, organizationId: Str, ipAddress: Str): void {
+	INSERT INTO clusters (id, organization_id, ip_address)
+	VALUES ({id}, {organizationId}, {ipAddress})
+	ON CONFLICT (id) DO NOTHING
+}
+
+query upsertMember(clusterId: Str, userId: Str, connId: Str, displayName: Str): void {
+	INSERT INTO members (cluster_id, user_id, conn_id, display_name)
+	VALUES ({clusterId}, {userId}, {connId}, {displayName})
+	ON CONFLICT (cluster_id, user_id) DO UPDATE SET
+		conn_id = excluded.conn_id,
+		display_name = excluded.display_name
+}
+
+query deleteMember(clusterId: Str, userId: Str): void {
+	DELETE FROM members WHERE cluster_id = {clusterId} AND user_id = {userId}
+}
+
+query deleteClusterIfEmpty(id: Str): void {
+	DELETE FROM clusters
+	WHERE id = {id} AND NOT EXISTS (SELECT 1 FROM members WHERE cluster_id = {id})
+}
+
+query selectCluster(id: Str): Cluster[dyn] {
+	SELECT id, organization_id AS organizationId, ip_address AS ipAddress
+	FROM clusters WHERE id = {id}
+}
+
+query selectPeers(clusterId: Str, userId: Str): Member[dyn] {
+	SELECT user_id AS userId, conn_id AS connId
+	FROM members WHERE cluster_id = {clusterId} AND user_id != {userId}
+}
+
+func clusterId(organizationId: Str, ipAddress: Str): Str {
+	return crypto.sha512("{organizationId}##{ipAddress}")
+}
+
+// The member goes in before the cluster row, and `leaveCluster` removes them in
+// the opposite order, so a cluster is never deleted under a joining member.
+func joinCluster(store: database.Store, user: auth.User, ipAddress: Str, connId: Str): Result<Str, sql.SqlError> {
+	id := clusterId(user.organizationId, ipAddress)
+	db := database.shard(store, id)
+	if sql.run(db, upsertMember(id, user.id, connId, user.displayName)) is Result.Error(why) {
+		return Result.Error(why)
+	}
+	if sql.run(db, insertCluster(id, user.organizationId, ipAddress)) is Result.Error(why) {
+		return Result.Error(why)
+	}
+	return Result.Ok(id)
+}
+
+func leaveCluster(store: database.Store, clusterId: Str, userId: Str): void {
+	db := database.shard(store, clusterId)
+	_ := sql.run(db, deleteMember(clusterId, userId))
+	_ := sql.run(db, deleteClusterIfEmpty(clusterId))
+}
+
+func getConnectedPeers(store: database.Store, id: Str, userId: Str): Member[dyn] {
+	if sql.run(database.shard(store, id), selectPeers(id, userId)) is Result.Ok(peers) {
+		return peers
+	}
+	return []
+}
+
+func findCluster(store: database.Store, id: Str): Result<Cluster, Bool> {
+	if sql.run(database.shard(store, id), selectCluster(id)) is Result.Ok([found, ..._]) {
+		return Result.Ok(found)
+	}
+	return Result.Error(false)
+}

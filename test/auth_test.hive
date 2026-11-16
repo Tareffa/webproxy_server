@@ -1,0 +1,24 @@
+import ../src/auth
+import ../src/database
+
+func user1(): auth.User {
+	return auth.User.User("123", "John Doe", ["read", "write"], "org1", 0.0)
+}
+
+func user2(): auth.User {
+	return auth.User.User("456", "Jane Smith", ["read"], "org2", 0.0)
+}
+
+test "get user by auth token" {
+	db := database.open()
+	token := "jaguaruna"
+	url := "https://rhm.dev"
+
+	assert auth.getUserByAuthToken(db, url, token) == Result.Error(false)
+
+	auth.storeUser(db, "other_token", user1())
+	auth.storeUser(db, token, user2())
+
+	assert auth.getUserByAuthToken(db, url, "other_token") == Result.Ok(user1())
+	assert auth.getUserByAuthToken(db, url, token) == Result.Ok(user2())
+}

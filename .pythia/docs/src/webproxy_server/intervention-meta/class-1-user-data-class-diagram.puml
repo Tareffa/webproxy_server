@@ -1,0 +1,17 @@
+@startuml
+title User Data Class Diagram
+
+class intervention
+class database
+class auth
+class Cluster
+class engine
+class ws
+
+intervention --> database
+intervention --> auth
+intervention --> Cluster
+intervention --> engine
+intervention --> ws
+
+@enduml

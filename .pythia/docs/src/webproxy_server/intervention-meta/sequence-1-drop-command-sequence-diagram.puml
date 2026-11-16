@@ -1,0 +1,20 @@
+@startuml
+title Drop Command Sequence Diagram
+
+participant User
+participant WebproxyServer
+participant Database
+
+User ->> WebproxyServer: /su-drop users example_user
+WebproxyServer ->> Database: drop_users_by_display_name("example_user")
+Database --> WebproxyServer: count (1)
+WebproxyServer ->> User: "Dropped 1 user(s) with display name example_user"
+
+User ->> WebproxyServer: /su-drop clusters cluster_id
+WebproxyServer ->> Database: drop_by_id("clusters", "cluster_id", "cluster", "cluster_id")
+Database --> WebproxyServer: "Dropped cluster cluster_id"
+
+User ->> WebproxyServer: /su-drop pending_resources resource_id
+WebproxyServer ->> Database: drop_by_id("pending_resources", "resource_id", "pending resource", "resource_id")
+Database --> WebproxyServer: "Dropped pending resource resource_id"
+@enduml

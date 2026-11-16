@@ -1,0 +1,168 @@
+// What this fork adds for Ottimizza: the relay that authenticates users
+// against Ottimizza's OAuth service, and the statistics `/info` serves, which
+// count cache hits, misses and the bandwidth the peers saved.
+
+import ./auth
+import ./database
+import ./environment
+
+// --- authentication relay ---------------------------------------------------
+
+// What `<OAUTH_BASE_URL>/oauth/userinfo` answers with, as far as it is read.
+type OauthUserInfo {
+	record: OauthRecord
+}
+
+type OauthRecord {
+	id: Int
+	username: Str
+	kind: Int -- JSON as type;
+	organization: OauthOrganization
+}
+
+type OauthOrganization {
+	id: Int
+}
+
+// `AUTHENTICATION_URL` is this relay (see `environment.authenticationUrl`):
+// it hands the request's `Authorization` header on to Ottimizza's OAuth
+// service and answers with the user in the shape `auth` reads.
+func authenticate(request: net.HttpRequest): net.HttpResponse {
+	if row(request.headers, "Authorization") is [_, token, ..._] {
+		if environment.oauthBaseUrl() is Result.Ok(baseUrl) {
+			asked := net.HttpRequest("GET", "{baseUrl}/oauth/userinfo", [["Accept", "application/json"], ["Authorization", token]], "")
+			if net.httpRequest(asked) is Result.Ok(answer) && answer.status == 200 && OauthUserInfo.decode(answer.body, json.codec()) is Result.Ok(info) {
+				return net.HttpResponse(200, [], encode(toAuthenticatedUser(info.record), json.codec()))
+			}
+		} else {
+			return net.HttpResponse(500, [], "OAUTH_BASE_URL is not set")
+		}
+	}
+	return net.HttpResponse(401, [], "Unauthorized")
+}
+
+func toAuthenticatedUser(record: OauthRecord): auth.AuthenticatedUser {
+	return auth.AuthenticatedUser("{record.id}", record.username, scopesOf(record.kind), "{record.organization.id}", record.kind == 9)
+}
+
+// The scopes each kind of Ottimizza user holds; kind 9 is also an administrator.
+func scopesOf(kind: Int): Str[dyn] {
+	switch kind {
+		0 { return ["*", "admin"] }
+		1 { return ["*"] }
+		2 { return ["*"] }
+		7 { return ["*", "admin", "analyst"] }
+		8 { return ["*", "admin", "analyst", "leader"] }
+		9 { return ["*", "admin", "analyst", "leader", "techleader"] }
+		_ { return [] }
+	}
+}
+
+// --- statistics ------------------------------------------------------------
+
+// What the statistics service is told. Every message is answered with the
+// `Counts` so far, which is what `Read` is for.
+type Stats {
+	// A requested resource was served from the cache: either a peer provided
+	// it, or a client reported finding it locally with `/h`.
+	Hit
+	// Resources that nobody provided before they expired.
+	Missed { count: Int }
+	// The bytes of a response that went peer to peer instead of to the origin.
+	Saved { bytes: Int }
+	Read
+	Counts { hits: Int, misses: Int, bandwidthSaved: Int }
+}
+
+type Totals {
+	hits: Int
+	misses: Int
+	bandwidthSaved: Int
+}
+
+proc stats(totals: mut Totals, message: Stats): Stats {
+	if message is Stats.Hit {
+		totals.hits = totals.hits + 1
+	} else if message is Stats.Missed(count) {
+		totals.misses = totals.misses + count
+	} else if message is Stats.Saved(bytes) {
+		totals.bandwidthSaved = totals.bandwidthSaved + bytes
+	}
+	return Stats.Counts(totals.hits, totals.misses, totals.bandwidthSaved)
+}
+
+func startStats(): Address<Stats> {
+	started := spawn(stats, Totals(0, 0, 0))
+	if started is Result.Ok(counter) {
+		return counter
+	} else if started is Result.Error(why) {
+		panic why
+	}
+}
+
+// Posted, never waited for, so counting never holds a connection up.
+func hit(counter: Address<Stats>): void {
+	async counter(Stats.Hit())
+}
+
+func missed(counter: Address<Stats>, count: Int): void {
+	if count > 0 {
+		async counter(Stats.Missed(count))
+	}
+}
+
+func saved(counter: Address<Stats>, bytes: Int): void {
+	async counter(Stats.Saved(bytes))
+}
+
+// --- /info -----------------------------------------------------------------
+
+// What `/info` answers with.
+type Info {
+	userCount: Int
+	clusterCount: Int
+	bandwidthSaved: Int
+	cacheMissCount: Int
+	cacheHitCount: Int
+}
+
+query countUsers(): Int[dyn] {
+	SELECT COUNT(*) FROM users
+}
+
+query countClusters(): Int[dyn] {
+	SELECT COUNT(*) FROM clusters
+}
+
+// `/info` is read by Ottimizza's own pages, wherever they are served from.
+func info(store: database.Store, counter: Address<Stats>): net.HttpResponse {
+	headers := [
+		["Access-Control-Allow-Headers", "*"],
+		["Access-Control-Allow-Methods", "GET,HEAD,PUT,PATCH,DELETE,OPTIONS"],
+		["Access-Control-Allow-Origin", "*"],
+		["Content-Type", "application/json"]
+	]
+	if counter(Stats.Read()) with timeout 1000 is Result.Ok(Stats.Counts(hits, misses, bandwidthSaved)) {
+		return net.HttpResponse(200, headers, encode(Info(userCount(store), clusterCount(store), bandwidthSaved, misses, hits), json.codec()))
+	}
+	return net.HttpResponse(503, headers, "Statistics unavailable")
+}
+
+// The users cached right now, one per auth token.
+func userCount(store: database.Store): Int {
+	if sql.run(store.users, countUsers()) is Result.Ok([count, ..._]) {
+		return count
+	}
+	return 0
+}
+
+// The clusters with live members right now, in every one of their databases.
+func clusterCount(store: database.Store): Int {
+	mut total := 0
+	for each db in store.clusters {
+		if sql.run(db, countClusters()) is Result.Ok([count, ..._]) {
+			total = total + count
+		}
+	}
+	return total
+}

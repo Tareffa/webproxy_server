@@ -1,0 +1,40 @@
+import ../src/database
+import ../src/ottimizza
+import ../src/router
+import ../src/ws
+
+func request(headers: Table): net.HttpRequest {
+	return net.HttpRequest("GET", "/ws", headers, "")
+}
+
+func get(url: Str): net.HttpResponse {
+	ctx := ws.Context(database.openStore(1), ws.startRegistry(), "https://auth.example.com", [], false, bypass("key"), ottimizza.startStats())
+	return router.handleRequest(ctx, net.HttpRequest("GET", url, [], ""))
+}
+
+test "the health check, the visualization, Ottimizza's endpoints and the websocket are the only paths" {
+	assert get("/health").status == 200
+	assert get("/health").body == "\{\"status\":\"UP\"}"
+	// 101 is what hands the request over to the websocket handler.
+	assert get("/ws").status == 101
+	assert get("/ws/?token=abc").status == 101
+	assert get("/").status == 404
+	assert get("/ws/else").body == "Not Found"
+	assert get("/info").status == 200
+	// Without a token there is nothing to relay.
+	assert get("/auth_relay").status == 401
+	assert get("/info/visual/else").status == 404
+}
+
+test "behind a proxy the IP comes from its headers, forwarded-for first" {
+	both := request([["X-Real-Ip", "198.51.100.2"], ["X-Forwarded-For", "198.51.100.1"]])
+	assert router.resolveIpAddress(both, "10.0.0.1:4711", false) == "198.51.100.1"
+	assert router.resolveIpAddress(request([["X-Real-Ip", "198.51.100.2"]]), "10.0.0.1:4711", false) == "198.51.100.2"
+}
+
+test "without headers, or when told to, the IP is the connection's own" {
+	forwarded := request([["X-Forwarded-For", "198.51.100.1"]])
+	assert router.resolveIpAddress(request([]), "203.0.113.9:4711", false) == "203.0.113.9"
+	assert router.resolveIpAddress(forwarded, "203.0.113.9:4711", true) == "203.0.113.9"
+	assert router.resolveIpAddress(forwarded, "[2001:db8::1]:4711", true) == "2001:db8::1"
+}

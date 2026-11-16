@@ -1,0 +1,11 @@
+@startuml
+title Engine Class Diagram
+
+class WebProxyServer.Engine {
+    + start(): Bool
+    + stop(): Bool
+    + process_request(request: Request): Response
+    - private_attribute: String
+}
+
+@enduml

@@ -1,0 +1,90 @@
+import ./auth
+import ./database
+import ./ottimizza
+
+// What a connection's outbox is told to do. Other connections never write to a
+// socket themselves: they push `SendText` to the outbox that owns it.
+type WsCommand {
+	SendText { text: Str }
+	// What a test's recording outbox answers with: every text it was sent.
+	Sent { texts: Str[dyn] }
+}
+
+type WsState {
+	Unauthorized { ipAddress: Str }
+	Authorized { user: auth.User, clusterId: Str, ipAddress: Str }
+	Intervention { user: auth.User }
+}
+
+// What handling one message decides: carry on in a state, or hang up.
+type Next {
+	Continue { state: WsState }
+	Stop
+}
+
+// Live connections by id. A socket cannot be stored in SQLite, so the tables
+// hold connection ids and this service maps them to the outboxes.
+// ponytail: one registry for every cluster. `map.delete` walks the whole map,
+// so the closes of a hundred thousand connections at once hold deliveries up
+// for some seconds; give each of the clusters' databases a registry of its own
+// if that ever shows.
+type Registry {
+	Register { connId: Str, outbox: Address<WsCommand> }
+	Unregister { connId: Str }
+	Deliver { connIds: Str[dyn], text: Str }
+	Done
+}
+
+// Everything a connection handler reaches.
+type Context {
+	store: database.Store
+	connections: Address<Registry>
+	authenticationUrl: Str
+	administratorIps: Str[dyn]
+	useNativeConnectionIp: Bool
+	// Per-boot secret used to anonymize the ids published by `/info/visual`.
+	anonymizationKey: Secret<Str>
+	// Counts cache hits, misses and the bandwidth saved, for `/info`.
+	stats: Address<ottimizza.Stats>
+}
+
+// Owns one socket and writes to it whatever it is sent.
+proc outbox(conn: mut net.WsConnection, command: WsCommand): WsCommand {
+	if command is WsCommand.SendText(text) {
+		_ := net.wsSend(conn, text)
+	}
+	return command
+}
+
+proc registry(outboxes: mut map.Map<Str, Address<WsCommand>>, message: Registry): Registry {
+	if message is Registry.Register(connId, box) {
+		map.set(outboxes, connId, box)
+	} else if message is Registry.Unregister(connId) {
+		map.delete(outboxes, connId)
+	} else if message is Registry.Deliver(connIds, text) {
+		for each connId in connIds {
+			if map.get(outboxes, connId) is Result.Ok(box) {
+				async box(WsCommand.SendText(text))
+			}
+		}
+	}
+	return Registry.Done()
+}
+
+func startRegistry(): Address<Registry> {
+	map.Map<Str, Address<WsCommand>> empty = map.new()
+	started := spawn(registry, empty)
+	if started is Result.Ok(connections) {
+		return connections
+	} else if started is Result.Error(why) {
+		panic why
+	}
+}
+
+// Sends `text` to every given connection that is still open, and waits for
+// nothing: the registry takes its messages in the order they were sent, and a
+// call that waited for its answer would be one more thing the runtime tracks
+// for every connection at once.
+func deliver(connections: Address<Registry>, connIds: Str[dyn], text: Str): void {
+	async connections(Registry.Deliver(connIds, text))
+}

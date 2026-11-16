@@ -1,0 +1,20 @@
+@startuml
+title Logger Class Diagram
+
+class Logger {
+  +Logger(db: database.Table(Log))
+  +new_logger(): Result(Logger, database.FileError)
+  +println(with logger: Logger, message: String): Nil
+  +println_error(with logger: Logger, message: String): Nil
+  +dump(from logger: Logger): Result(String, Error)
+}
+
+class Log {
+  -timestamp: Float
+  -error: Bool
+  -message: String
+  +Log(timestamp: Float, error: Bool, message: String)
+}
+
+Logger --> Log : contains
+@enduml

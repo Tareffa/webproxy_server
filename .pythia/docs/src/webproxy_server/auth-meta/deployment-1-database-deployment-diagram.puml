@@ -1,0 +1,18 @@
+@startuml
+title Database Deployment Diagram
+
+actor User
+participant WebProxyServer as WP
+participant DatabaseServer as DB
+
+WP -> DB: store_user(token, user)
+DB -> DB: upsert(token, user)
+
+WP -> DB: get_user_by_auth_token(token)
+DB -> WP: find(token)
+
+WP -> WP: prepare_auth_request(token)
+WP -> WebProxyServer: send(auth_request)
+WebProxyServer -> User: parse_response
+
+@enduml

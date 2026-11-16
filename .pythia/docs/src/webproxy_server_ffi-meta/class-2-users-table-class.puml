@@ -1,0 +1,9 @@
+@startuml
+title Users Table Class
+
+class UsersTable {
+    +delete_old_users_from_table/Table(): integer
+}
+
+UsersTable --> ETS : delete_old_users_from_table
+@enduml

@@ -1,0 +1,14 @@
+@startuml
+title Error Handling
+
+participant Router
+participant Engine
+participant Mist
+
+Router->Engine: on_close(db.clusters, state)
+alt state is Unreacheable
+    Engine->Mist: stop()
+else state is Unauthorized or Authorized
+    Engine->Mist: continue(state)
+end
+@enduml

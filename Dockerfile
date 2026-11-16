@@ -1,28 +1,104 @@
-ARG ERLANG_VERSION=28.0.2.0
-ARG GLEAM_VERSION=v1.16.0
+# syntax=docker/dockerfile:1
+#
+# Builds and runs src/main.hive, from nothing but this folder.
+#
+#   docker build -t main .
+#   docker run --rm -p 8080:8080 main
+#
+# Nothing has to be installed to build this but Docker: the image downloads Go
+# — the one thing `hivec build` needs that it does not carry as source text the
+# way it does its own runtime — downloads the compiler that wrote this file,
+# for the platform being built for, and compiles the program with the two of
+# them.
+#
+# Two stages: the first has Go and the compiler and does the building; the
+# second is just the binary that came out of it, with nothing else in the image
+# — not Go, not the compiler, not even a shell.
+#
+# Everything beside this file goes into the build, so a .dockerignore is what
+# keeps out of it what does not belong in it: a .git, a build directory, an
+# .env holding anything private — which `docker run -e` hands over better
+# anyway, and `hive.env.get` reads either the same way.
+#
+# Written by `hive container src/main.hive`, and an ordinary Dockerfile from there
+# on: editing it is expected. Running the command again leaves a Dockerfile
+# alone, and writes Dockerfile-hive-container beside it.
 
-# Gleam stage
-FROM ghcr.io/gleam-lang/gleam:${GLEAM_VERSION}-scratch AS gleam
+##############################################################################
+# Stage 1 — download Go and the compiler, then build
+##############################################################################
+FROM debian:bookworm-slim AS builder
 
-# Build stage
-FROM erlang:${ERLANG_VERSION}-alpine AS build
-COPY --from=gleam /bin/gleam /bin/gleam
-COPY . /app/
-RUN cd /app && gleam export erlang-shipment
+# What Docker is building for: amd64 on an ordinary machine, arm64 on an
+# Apple-silicon one or a Graviton. Go and the compiler are both downloaded for
+# it, so this builds natively wherever it runs, and
+# `docker buildx build --platform linux/arm64 .` is the whole of building it
+# somewhere else.
+ARG TARGETARCH
 
-# Final stage
-FROM erlang:${ERLANG_VERSION}-alpine
-ARG GIT_SHA
-ARG BUILD_TIME
-ENV GIT_SHA=${GIT_SHA}
-ENV BUILD_TIME=${BUILD_TIME}
-COPY healthcheck.sh /app/healthcheck.sh
-RUN \
-  chmod +x /app/healthcheck.sh \
-  && addgroup --system webapp \
-  && adduser --system webapp -g webapp
-USER webapp
-COPY --from=build /app/build/erlang-shipment /app
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates curl \
+ && rm -rf /var/lib/apt/lists/*
+
+# Go itself, whatever the current release is.
+RUN set -eux; \
+	version="$(curl -fsSL 'https://go.dev/VERSION?m=text' | head -n1)"; \
+	curl -fsSL "https://go.dev/dl/${version}.linux-${TARGETARCH}.tar.gz" -o /tmp/go.tar.gz; \
+	tar -C /usr/local -xzf /tmp/go.tar.gz; \
+	rm /tmp/go.tar.gz
+ENV PATH="/usr/local/go/bin:${PATH}"
+
+# The compiler itself — this one, rather than whatever release is newest on
+# the day the image is built. The program beside this file was read by the
+# compiler that wrote it, and that is the compiler that should build it: a
+# later release is a different compiler, and an image following the newest is
+# one that can stop building a program that never changed.
+#
+# `docker build --build-arg HIVEC_VERSION=v9.9.9 .` builds with another one,
+# and running `hive container` from that compiler writes it in here.
+ARG HIVEC_VERSION=v0.3.8
+RUN curl -fsSL \
+      "https://github.com/R0DR160HM/hive-lang/releases/download/${HIVEC_VERSION}/hivec-linux-${TARGETARCH}" \
+      -o /usr/local/bin/hivec \
+ && chmod +x /usr/local/bin/hivec
+
+# A static binary, so the runtime stage below needs no libc.
+ENV CGO_ENABLED=0
+
 WORKDIR /app
-ENTRYPOINT ["/app/entrypoint.sh"]
-CMD ["run"]
+
+# The whole folder, because a program is its entrypoint and whatever that
+# imported, and because what it reads while it runs is nobody's business but
+# its own. A .dockerignore is what narrows this.
+COPY . .
+
+# This program opens a database, so the build resolves the SQL drivers with
+# `go mod tidy` before it compiles — the one step here that fetches anything
+# of its own. Both drivers are pure Go, so nothing of them is left for the
+# runtime stage to carry.
+
+# `hivec build` leaves the executable beside the entrypoint, and the Go
+# module it came from in src/main.hive-build/. The test is there to fail the image
+# build now rather than at `docker run`.
+RUN hivec build /app/src/main.hive \
+ && test -x /app/src/main
+
+##############################################################################
+# Stage 2 — runtime
+##############################################################################
+# What the program ships in: the binary, the certificates an HTTPS call needs,
+# the time zones — and nothing else at all. There is no shell in here, so
+# `docker exec` has nothing to run; that is the point of it rather than an
+# oversight.
+# `:nonroot` runs it as an unprivileged user, as the Gleam image did.
+FROM gcr.io/distroless/static-debian12:nonroot AS runtime
+WORKDIR /app
+COPY --from=builder /app/src/main /usr/local/bin/main
+
+# This program starts a server, but nothing in it says on which port: every
+# one it starts is handed a port worked out while it runs — from a variable,
+# or out of the environment. So 8080 is the usual default rather than
+# anything read off the program: change it to whatever this one listens on.
+EXPOSE 8080
+
+ENTRYPOINT ["/usr/local/bin/main"]

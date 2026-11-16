@@ -1,0 +1,14 @@
+@startuml
+title Web Proxy Server Test Sequence Diagram
+
+participant webproxy_server
+participant dependencies
+
+webproxy_server -> dependencies: initialize
+webproxy_server <- dependencies: setup_complete
+webproxy_server -> dependencies: handle_request(request)
+webproxy_server <- dependencies: response(response)
+webproxy_server -> dependencies: cleanup
+webproxy_server <- dependencies: teardown_complete
+
+@enduml

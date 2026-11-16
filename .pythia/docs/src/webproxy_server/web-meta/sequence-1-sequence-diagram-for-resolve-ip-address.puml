@@ -1,0 +1,28 @@
+@startuml
+title Sequence Diagram for resolve_ip_address
+
+participant "Client"
+participant "Web Proxy Server" as Server
+
+Client -> Server: HTTP Request with headers (X-Forwarded-For, X-Real-IP)
+Server -> Server: environment.use_native_connection_ip()
+alt use_native_connection_ip is False
+    Server -> Server: request.get_header("x-forwarded-for")
+    alt "x-forwarded-for" header exists
+        Server -> Client: Return IP address from "x-forwarded-for"
+    else "x-forwarded-for" header does not exist
+        Server -> Server: request.get_header("x-real-ip")
+        alt "x-real-ip" header exists
+            Server -> Client: Return IP address from "x-real-ip"
+        else "x-real-ip" header does not exist
+            Server -> Server: mist.get_connection_info(request.body)
+            Server -> Server: mist.ip_address_to_string(info.ip_address)
+            Server -> Client: Return resolved IP address
+    end
+else use_native_connection_ip is True
+    Server -> Server: mist.get_connection_info(request.body)
+    Server -> Server: mist.ip_address_to_string(info.ip_address)
+    Server -> Client: Return resolved IP address
+end
+
+@enduml

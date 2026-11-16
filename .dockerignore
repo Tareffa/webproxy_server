@@ -1,0 +1,12 @@
+.git
+.github
+.claude
+.hivedocs
+.pythia
+bench
+build
+*.md
+src/main
+src/main.hive-build
+src/main-analysis.html
+.env

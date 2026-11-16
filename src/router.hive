@@ -1,0 +1,140 @@
+import ./engine
+import ./intervention
+import ./ottimizza
+import ./visual
+import ./ws
+
+// Answers everything that is not a websocket, and hands a request for `/ws`
+// over to `handleConnection` by answering 101.
+func handleRequest(ctx: ws.Context, request: net.HttpRequest): net.HttpResponse {
+	switch pathOf(request.url) {
+		"auth_relay" { return ottimizza.authenticate(request) }
+		"info" { return ottimizza.info(ctx.store, ctx.stats) }
+		"health" { return net.HttpResponse(200, [], "\{\"status\":\"UP\"}") }
+		"info/visual" { return visual.page() }
+		"info/visual/data" { return visual.data(ctx.store, ctx.anonymizationKey) }
+		"ws" { return net.HttpResponse(101, [], "") }
+		_ { return net.HttpResponse(404, [], "Not Found") }
+	}
+}
+
+// A request's path as its segments joined by `/`, so `/ws`, `/ws/` and
+// `/ws?token=abc` are all `ws`.
+func pathOf(url: Str): Str {
+	mut path := url
+	if url is "{before}?{_query}" {
+		path = before
+	}
+	return split(path, "/") |> filter(isSegment) |> join("/")
+}
+
+func isSegment(part: Str): Bool {
+	return part != ""
+}
+
+// Runs one websocket connection, from its first message to its last.
+proc handleConnection(ctx: ws.Context, conn: net.WsConnection): void {
+	serve(ctx, conn, resolveIpAddress(net.wsRequest(conn), conn.address, ctx.useNativeConnectionIp))
+	net.wsClose(conn)
+}
+
+proc serve(ctx: ws.Context, conn: net.WsConnection, ipAddress: Str): void {
+	started := spawn(ws.outbox, conn)
+	if started is Result.Ok(outbox) {
+		connId := crypto.randomHex(16)
+		connections := ctx.connections
+		// Posted, not waited for: it is in the registry's queue before anything
+		// can be sent to this connection, which is all the order that matters.
+		async connections(ws.Registry.Register(connId, outbox))
+
+		mut ws.WsState state = ws.WsState.Unauthorized(ipAddress)
+		for ; true; {
+			if net.wsReceive(conn) is Result.Ok(message) && handleWsMessage(ctx, connId, conn, state, message) is ws.Next.Continue(next) {
+				state = next
+			} else {
+				break
+			}
+		}
+
+		engine.onClose(ctx.store, state)
+		async connections(ws.Registry.Unregister(connId))
+		kill(outbox)
+	}
+}
+
+func handleWsMessage(ctx: ws.Context, connId: Str, conn: net.WsConnection, state: ws.WsState, message: Str): ws.Next {
+	switch message, state {
+		"ping", _ {
+			return engine.ping(conn, state)
+		}
+
+		// A client found a resource in its own cache, in whatever state it is.
+		"/h", _ {
+			ottimizza.hit(ctx.stats)
+			return ws.Next.Continue(state)
+		}
+
+		"/s {authToken}", ws.WsState.Unauthorized(ipAddress) {
+			return engine.subscribe(ctx, ipAddress, connId, authToken, conn)
+		}
+
+		_, ws.WsState.Unauthorized(_) {
+			return ws.Next.Continue(state)
+		}
+
+		"/r {resourceName}", ws.WsState.Authorized(user, clusterId, ipAddress) {
+			return engine.require(ctx, clusterId, user, ipAddress, resourceName)
+		}
+
+		"/p {data}", ws.WsState.Authorized(user, clusterId, ipAddress) {
+			return engine.provide(ctx, clusterId, user, ipAddress, data)
+		}
+
+		"/upgrade", ws.WsState.Authorized(user, _, ipAddress) {
+			return engine.upgrade(user, ipAddress, ctx.administratorIps, conn)
+		}
+
+		_, ws.WsState.Intervention(_) {
+			if intervention.answer(ctx.store, ctx.connections, message) is Result.Ok(text) {
+				return intervention.reply(conn, state, text)
+			}
+			return ws.Next.Continue(state)
+		}
+
+		_, _ {
+			return ws.Next.Continue(state)
+		}
+	}
+}
+
+// Resolves the originating client IP for an incoming request.
+//
+// Behind a reverse proxy (the default, `USE_NATIVE_CONNECTION_IP` unset or
+// `false`) the IP is taken from the `X-Forwarded-For` header, falling back to
+// `X-Real-IP`. When `USE_NATIVE_CONNECTION_IP` is `true`, or when neither
+// header is present, the transport-level connection IP is used instead: the
+// host of `address`, the connection's own `host:port`.
+func resolveIpAddress(request: net.HttpRequest, address: Str, useNativeConnectionIp: Bool): Str {
+	if !useNativeConnectionIp {
+		if header(request, "X-Forwarded-For") is Result.Ok(ip) {
+			return ip
+		}
+		if header(request, "X-Real-Ip") is Result.Ok(ip) {
+			return ip
+		}
+	}
+	switch address {
+		// An IPv6 host is written in brackets, to tell its colons from the port's.
+		"[{host}]:{_port is (\d+)}" { return host }
+		"{host}:{_port is (\d+)}" { return host }
+		_ { return address }
+	}
+}
+
+// The first value of a header, by its canonical name.
+func header(request: net.HttpRequest, name: Str): Result<Str, Bool> {
+	if row(request.headers, name) is [_, value, ..._] {
+		return Result.Ok(value)
+	}
+	return Result.Error(false)
+}

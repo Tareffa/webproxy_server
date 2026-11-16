@@ -1,0 +1,40 @@
+@startuml
+title Intervention
+
+class intervention {
+  +drop(users: database.Table(auth.User), clusters: database.Table(cluster.Cluster), pending: engine.PendingResourcesQueue, command: String): String
+  +cluster_report(users: database.Table(auth.User), clusters: database.Table(cluster.Cluster), query: String): String
+  +invalidate_resource(users: database.Table(auth.User), clusters: database.Table(cluster.Cluster), command: String): String
+}
+
+class auth {
+  +new_user_table(): database.Table(auth.User)
+}
+
+class cluster {
+  +new_clusters_table(): database.Table(cluster.Cluster)
+}
+
+class engine {
+  +new_pending_resources_queue(): engine.PendingResourcesQueue
+}
+
+class database {
+  +transaction(table: any): database.Transaction
+  +upsert(ref: database.Transaction, key: String, value: any): Result<(), Error>
+  +select(ref: database.Transaction, select_fn: Function): Result<List<Tuple>>, Error>
+  +find(ref: database.Transaction, id: String): Result<cluster.Cluster, Error>
+}
+
+class ws {
+  +WsCommand
+  +SendText(String)
+}
+
+intervention --> auth : uses
+intervention --> cluster : uses
+intervention --> engine : uses
+intervention --> database : uses
+intervention --> ws : uses
+
+@enduml

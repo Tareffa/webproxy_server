@@ -1,0 +1,11 @@
+@startuml
+title Cluster Class
+
+class Cluster {
+  -organization_id: String
+  -ip_address: String
+  -members: Dict(String, Subject(ws.WsCommand))
+  +Cluster(organization_id: String, ip_address: String, members: Dict(String, Subject(ws.WsCommand)))
+}
+
+@enduml

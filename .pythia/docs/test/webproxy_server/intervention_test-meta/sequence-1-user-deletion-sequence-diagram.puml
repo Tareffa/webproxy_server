@@ -1,0 +1,14 @@
+@startuml
+title User Deletion Sequence Diagram
+
+participant User
+participant InterventionModule
+participant Database
+
+User -> InterventionModule: drop(users, clusters, pending, "users alice")
+InterventionModule -> Database: select(users, select_fn)
+Database -->> InterventionModule: rows (["alice"])
+InterventionModule -> Database: delete(users, ["tok-a", "tok-a2"])
+Database -->> InterventionModule: Nil
+InterventionModule -> User: "Dropped 2 user(s) with display name alice"
+@enduml

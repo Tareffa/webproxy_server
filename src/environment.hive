@@ -1,0 +1,59 @@
+// Centralizes access to every environment variable the server reads. No other
+// module should call `env` directly.
+
+// The TCP port the server binds to. Defaults to `8080` when unset or invalid.
+func port(): Int {
+	if env.get("PORT") is Result.Ok(raw) && conv.sti(raw) is Result.Ok(n) {
+		return n
+	}
+	return 8080
+}
+
+// The URL used to authenticate users. This fork always authenticates through
+// its own relay, `/auth_relay` (see `ottimizza.authenticate`), so
+// `AUTHENTICATION_URL` is not read.
+func authenticationUrl(): Str {
+	return "http://localhost:8080/auth_relay"
+}
+
+// The base URL of Ottimizza's OAuth service, which `/auth_relay` asks for
+// `/oauth/userinfo`. Read on every relayed request.
+func oauthBaseUrl(): Result<Str, Bool> {
+	if env.get("OAUTH_BASE_URL") is Result.Ok(url) {
+		return Result.Ok(url)
+	}
+	return Result.Error(false)
+}
+
+// Whether to trust the transport-level connection IP instead of the
+// `X-Forwarded-For` / `X-Real-IP` headers. Defaults to `false`, which suits a
+// deployment behind a reverse proxy. Set to `true` when the server faces
+// clients directly.
+func useNativeConnectionIp(): Bool {
+	return env.get("USE_NATIVE_CONNECTION_IP") is Result.Ok("{_before is (\s*)}{_value is ((?i)true|1)}{_after is (\s*)}")
+}
+
+// The IP addresses allowed to upgrade to intervention mode, parsed from the
+// `AUTHORIZED_ADMINISTRATOR_IPS` JSON array. A missing, malformed, or empty
+// value yields an empty list, meaning no one is allowed to upgrade.
+func authorizedAdministratorIps(): Str[dyn] {
+	if env.get("AUTHORIZED_ADMINISTRATOR_IPS") is Result.Ok(raw) {
+		return parseStringList(raw)
+	}
+	return []
+}
+
+// A JSON array of strings, or an empty list when `raw` is anything else.
+func parseStringList(raw: Str): Str[dyn] {
+	mut Str[dyn] values = []
+	if json.JsonValue.decode(raw, json.codec()) is Result.Ok(json.JsonValue.Array(items)) {
+		for each item in items {
+			if item is json.JsonValue.String(value) {
+				append(values, value)
+			} else {
+				return []
+			}
+		}
+	}
+	return values
+}

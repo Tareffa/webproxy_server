@@ -1,0 +1,11 @@
+@startuml
+title User Class
+
+class User {
+  - UserId: integer
+  - DisplayName: string
+  - Scopes: list
+  - OrganizationId: integer
+  - CreatedAt: timestamp
+}
+@enduml

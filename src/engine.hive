@@ -1,0 +1,146 @@
+import ./auth
+import ./cluster
+import ./database
+import ./ottimizza
+import ./ws
+
+// A pending resource as it is taken off the queue: its name, and the
+// connection waiting for it, `""` when its requester is not among the
+// provider's peers.
+type TakenResource {
+	resourceName: Str
+	connId: Str
+}
+
+// What a requester's peers are asked for.
+type Petition {
+	resourceId: Str
+	scopes: Str[dyn]
+	resourceName: Str
+}
+
+query insertPendingResource(id: Str, clusterId: Str, userId: Str, resourceName: Str, createdAt: Int): void {
+	INSERT INTO pending_resources (id, cluster_id, user_id, resource_name, created_at)
+	VALUES ({id}, {clusterId}, {userId}, {resourceName}, {createdAt})
+}
+
+query deletePendingResourcesCreatedBefore(cutoff: Int): void {
+	DELETE FROM pending_resources WHERE created_at < {cutoff}
+}
+
+// Finds and deletes in one statement, so a resource is provided only once, and
+// looks its requester up among the provider's peers on the way out. Only a
+// resource asked for in the provider's own cluster is its to take.
+query takePendingResource(id: Str, clusterId: Str, providerId: Str): TakenResource[dyn] {
+	DELETE FROM pending_resources WHERE id = {id} AND cluster_id = {clusterId}
+	RETURNING resource_name AS resourceName, COALESCE((
+		SELECT conn_id FROM members
+		WHERE cluster_id = {clusterId}
+		  AND user_id = pending_resources.user_id
+		  AND user_id != {providerId}
+	), '') AS connId
+}
+
+query deletePendingResource(id: Str): void {
+	DELETE FROM pending_resources WHERE id = {id}
+}
+
+func ping(conn: net.WsConnection, state: ws.WsState): ws.Next {
+	_ := net.wsSend(conn, "pong")
+	return ws.Next.Continue(state)
+}
+
+func subscribe(ctx: ws.Context, ipAddress: Str, connId: Str, authToken: Str, conn: net.WsConnection): ws.Next {
+	if auth.getUserByAuthToken(ctx.store.users, ctx.authenticationUrl, authToken) is Result.Ok(user) && cluster.joinCluster(ctx.store, user, ipAddress, connId) is Result.Ok(clusterId) {
+		_ := net.wsSend(conn, "subscribed")
+		return ws.Next.Continue(ws.WsState.Authorized(user, clusterId, ipAddress))
+	}
+	return ws.Next.Continue(ws.WsState.Unauthorized(ipAddress))
+}
+
+func require(ctx: ws.Context, clusterId: Str, user: auth.User, ipAddress: Str, resourceName: Str): ws.Next {
+	peers := cluster.getConnectedPeers(ctx.store, clusterId, user.id)
+
+	resourceId := crypto.randomHex(16)
+	if sql.run(database.shard(ctx.store, clusterId), insertPendingResource(resourceId, clusterId, user.id, resourceName, time.now())) is Result.Ok(_) {
+		petition := encode(Petition(resourceId, user.scopes, resourceName), json.codec())
+		ws.deliver(ctx.connections, map(peers, connIdOf), "/r {petition}")
+	} else {
+		term.status("Unable to add resource to queue")
+	}
+
+	return ws.Next.Continue(ws.WsState.Authorized(user, clusterId, ipAddress))
+}
+
+func connIdOf(member: cluster.Member): Str {
+	return member.connId
+}
+
+// Removes every resource nobody provided within a minute of its request, and
+// answers with how many there were: each one is a cache miss. One sweep stands
+// in for a sleeping thread per request, so a resource lives a minute plus at
+// most the time between two sweeps.
+// ponytail: scans the whole queue each sweep; index `created_at` if the queue
+// ever holds enough for that to show.
+func removeExpiredPendingResources(store: database.Store): Int {
+	cutoff := time.now() - 60_000
+	mut removed := 0
+	for each db in store.clusters {
+		if sql.run(db, deletePendingResourcesCreatedBefore(cutoff)) is Result.Ok(count) {
+			removed = removed + count
+		}
+	}
+	return removed
+}
+
+// Takes a pending resource off the queue for `providerId`, a member of
+// `clusterId`. An error when there is no such resource, or no longer.
+func takeResource(store: database.Store, resourceId: Str, clusterId: Str, providerId: Str): Result<TakenResource, Bool> {
+	if sql.run(database.shard(store, clusterId), takePendingResource(resourceId, clusterId, providerId)) is Result.Ok([taken, ..._]) {
+		return Result.Ok(taken)
+	}
+	return Result.Error(false)
+}
+
+func provide(ctx: ws.Context, clusterId: Str, user: auth.User, ipAddress: Str, data: Str): ws.Next {
+	if data is "{resourceId} {responseJson}" {
+		if takeResource(ctx.store, resourceId, clusterId, user.id) is Result.Ok(taken) {
+			// Answered by a peer, whether or not its requester is still there.
+			ottimizza.hit(ctx.stats)
+			if taken.connId != "" {
+				Str[dyn] connIds = [taken.connId]
+				ws.deliver(ctx.connections, connIds, "/p {taken.resourceName} {responseJson}")
+				ottimizza.saved(ctx.stats, bytes(responseJson))
+			}
+		}
+		return ws.Next.Continue(ws.WsState.Authorized(user, clusterId, ipAddress))
+	}
+	return ws.Next.Stop()
+}
+
+func upgrade(user: auth.User, ipAddress: Str, administratorIps: Str[dyn], conn: net.WsConnection): ws.Next {
+	switch user, ipIsAuthorizedAdministrator(administratorIps, ipAddress) {
+		auth.User.User, _ {
+			term.status("User {user.displayName} from organization {user.organizationId} tried to upgrade their connection without an administrator account.")
+			return ws.Next.Stop()
+		}
+		auth.User.SysAdmin, false {
+			term.status("Administrator {user.displayName} tried to upgrade their connection from {ipAddress}, which is not in the AUTHORIZED_ADMINISTRATOR_IPS list.")
+			return ws.Next.Stop()
+		}
+		auth.User.SysAdmin, true {
+			_ := net.wsSend(conn, "Successfully upgraded. You are now in intervention mode.")
+			return ws.Next.Continue(ws.WsState.Intervention(user))
+		}
+	}
+}
+
+func ipIsAuthorizedAdministrator(authorized: Str[dyn], ipAddress: Str): Bool {
+	return indexOf(authorized, "*") is Result.Ok(_) || indexOf(authorized, ipAddress) is Result.Ok(_)
+}
+
+func onClose(store: database.Store, state: ws.WsState): void {
+	if state is ws.WsState.Authorized(user, clusterId, _) {
+		cluster.leaveCluster(store, clusterId, user.id)
+	}
+}

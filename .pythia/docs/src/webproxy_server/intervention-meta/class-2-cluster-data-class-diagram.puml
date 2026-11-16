@@ -1,0 +1,61 @@
+@startuml
+title Cluster Data Class Diagram
+
+class Database {
+  +Table<User>
+  +Table<Cluster>
+  +Table<PendingResource>
+}
+
+class User {
+  -String id
+  -String display_name
+  -List<String> scopes
+  -String organization_id
+  -Float created_at
+}
+
+class Cluster {
+  -String id
+  -String ip_address
+  -String organization_id
+  -Dict<String, String> members
+}
+
+class PendingResource {
+  -String id
+  // Other fields not shown
+}
+
+class Intervention {
+  +drop_value(database.Table<User>, database.Table<Cluster>, database.Table<PendingResource>, mist.WebsocketConnection, ws.WsState, String) -> mist.Next<ws.WsState, a>
+  +drop(database.Table<User>, database.Table<Cluster>, database.Table<PendingResource>, String) -> String
+  +cluster_info(database.Table<User>, database.Table<Cluster>, mist.WebsocketConnection, ws.WsState, String) -> mist.Next<ws.WsState, a>
+  +cluster_report(database.Table<User>, database.Table<Cluster>, String) -> String
+  +force_cache_invalidation(database.Table<User>, database.Table<Cluster>, mist.WebsocketConnection, ws.WsState, String) -> mist.Next<ws.WsState, a>
+  +invalidate_resource(database.Table<User>, database.Table<Cluster>, String) -> String
+}
+
+class WsState
+class Subject(ws.WsCommand)
+class WebsocketConnection
+
+Database --> User : Contains
+Database --> Cluster : Contains
+Database --> PendingResource : Contains
+
+Intervention --> drop_value
+Intervention --> drop
+Intervention --> cluster_info
+Intervention --> cluster_report
+Intervention --> force_cache_invalidation
+Intervention --> invalidate_resource
+
+drop_value --> WsState
+drop --> String
+cluster_info --> WsState
+cluster_report --> String
+force_cache_invalidation --> WsState
+invalidate_resource --> String
+
+@enduml

@@ -1,0 +1,11 @@
+@startuml
+title EnvironmentSettings
+
+class EnvironmentSettings {
+  +port(): Int
+  +authentication_url(): String
+  +use_native_connection_ip(): Bool
+  +authorized_administrator_ips(): List(String)
+}
+
+@enduml

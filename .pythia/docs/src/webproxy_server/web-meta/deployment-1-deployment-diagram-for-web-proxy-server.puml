@@ -1,0 +1,32 @@
+@startuml
+title Deployment Diagram for Web Proxy Server
+
+package "Web Proxy Server" {
+  package "Codebase" {
+    class "webproxy_server/environment"
+    class "webproxy_server/web"
+  }
+}
+
+package "Infrastructure" {
+  rectangle "Reverse Proxy" {
+    node "Proxy Server"
+  }
+
+  rectangle "Application Servers" {
+    node "App Server 1"
+    node "App Server 2"
+  }
+
+  rectangle "External Systems" {
+    node "Database"
+    node "Cache"
+  }
+}
+
+webproxy_server/web --> Reverse Proxy
+Reverse Proxy --> webproxy_server/environment
+webproxy_server/web --> Application Servers: reverse proxy to application servers
+Application Servers --> External Systems
+
+@enduml

@@ -1,0 +1,20 @@
+@startuml
+title Get User by Token Sequence Diagram
+
+participant Client
+participant WebProxyServer
+participant Database
+
+Client -> WebProxyServer: get_user_by_auth_token(token)
+WebProxyServer -> WebProxyServer: prepare_auth_request(token)
+WebProxyServer -> WebProxyServer: send request to authentication URL
+Database -> WebProxyServer: find(ref, token) // Assuming ref is already defined
+alt user found
+  WebProxyServer -> WebProxyServer: json.parse(resp.body, json_to_user_decoder())
+  WebProxyServer -> Database: store_user(cache, token, user)
+  WebProxyServer --> Client: Ok(user)
+else user not found
+  WebProxyServer --> Client: Error(Nil)
+end
+
+@enduml

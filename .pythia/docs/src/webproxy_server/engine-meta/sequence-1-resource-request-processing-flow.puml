@@ -1,0 +1,24 @@
+@startuml
+title Resource Request Processing Flow
+
+participant Client
+participant WebproxyServer
+participant Database
+participant Cluster
+
+Client->WebproxyServer: Send subscription request
+WebproxyServer->Database: Authenticate user
+Database->WebproxyServer: User authenticated
+WebproxyServer->Cluster: Join cluster
+Cluster->WebproxyServer: Cluster joined
+WebproxyServer->WebproxyServer: Add resource to pending queue
+WebproxyServer->Database: Store pending resource
+Database->WebproxyServer: Resource stored
+WebproxyServer->Cluster: Broadcast resource request
+Cluster->WebproxyServer: Notify peers
+WebproxyServer->Peer: Send resource petition
+Peer->WebproxyServer: Confirm resource request
+WebproxyServer->Database: Remove pending resource
+Database->WebproxyServer: Resource removed
+
+@enduml

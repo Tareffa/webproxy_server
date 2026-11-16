@@ -1,0 +1,77 @@
+import ../src/cluster
+import ../src/database
+import ../src/engine
+
+// --- helpers ---------------------------------------------------------------
+
+query pendingResourceIds(): Str[dyn] {
+	SELECT id FROM pending_resources ORDER BY id
+}
+
+// Every pending resource's id, whichever database it is in.
+func pendingIds(store: database.Store): Str[dyn] {
+	mut Str[dyn] ids = []
+	for each db in store.clusters {
+		if sql.run(db, pendingResourceIds()) is Result.Ok(found) {
+			ids = ids + found
+		}
+	}
+	return sort(ids)
+}
+
+func join(store: database.Store, clusterId: Str, userId: Str): void {
+	_ := sql.run(database.shard(store, clusterId), cluster.upsertMember(clusterId, userId, "conn-{userId}", userId))
+}
+
+func request(store: database.Store, resourceId: Str, clusterId: Str, userId: Str, createdAt: Int): void {
+	_ := sql.run(database.shard(store, clusterId), engine.insertPendingResource(resourceId, clusterId, userId, "resource", createdAt))
+}
+
+// --- take ------------------------------------------------------------------
+
+test "a provided resource goes to its requester, once" {
+	store := database.openStore(2)
+
+	join(store, "0-east", "alice")
+	join(store, "0-east", "bob")
+	request(store, "res-1", "0-east", "alice", time.now())
+
+	assert engine.takeResource(store, "res-1", "0-east", "bob") == Result.Ok(engine.TakenResource("resource", "conn-alice"))
+	// It left the queue with the first answer, so a second provider gets nothing.
+	assert engine.takeResource(store, "res-1", "0-east", "bob") == Result.Error(false)
+}
+
+test "a resource is only taken by the requester's cluster, and delivered to a peer" {
+	store := database.openStore(2)
+
+	join(store, "0-east", "alice")
+	join(store, "0-east", "bob")
+	join(store, "1-west", "carol")
+	join(store, "2-north", "dave")
+	request(store, "own", "0-east", "bob", time.now())
+	request(store, "west", "1-west", "carol", time.now())
+	request(store, "north", "2-north", "dave", time.now())
+
+	// A provider is not its own peer: the resource is taken, and nobody is told.
+	assert engine.takeResource(store, "own", "0-east", "bob") == Result.Ok(engine.TakenResource("resource", ""))
+	// What another cluster asked for is not this one's to take, whether that
+	// cluster is in another database or, like `2-north`, in the same one.
+	assert engine.takeResource(store, "west", "0-east", "bob") == Result.Error(false)
+	assert engine.takeResource(store, "north", "0-east", "bob") == Result.Error(false)
+	assert pendingIds(store) == ["north", "west"]
+}
+
+// --- expiry ----------------------------------------------------------------
+
+test "a resource nobody provided expires after a minute, in every database" {
+	store := database.openStore(2)
+
+	request(store, "fresh", "0-east", "alice", time.now())
+	request(store, "stale", "0-east", "alice", time.now() - 61_000)
+	request(store, "stale too", "1-west", "carol", time.now() - 61_000)
+
+	// Each one is a cache miss, so the sweep says how many it removed.
+	assert engine.removeExpiredPendingResources(store) == 2
+	assert pendingIds(store) == ["fresh"]
+	assert engine.removeExpiredPendingResources(store) == 0
+}

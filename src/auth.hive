@@ -1,0 +1,89 @@
+import ./environment
+
+type User {
+	id: Str
+	displayName: Str
+	scopes: Str[dyn]
+	organizationId: Str
+	createdAt: Float
+
+	User
+	SysAdmin
+}
+
+// The JSON user object the authentication service answers with.
+type AuthenticatedUser {
+	id: Str
+	displayName: Str
+	scopes: Str[dyn]
+	organizationId: Str
+	isAdmin: Bool
+}
+
+// How a user is stored: SQLite holds scalars only, so the scopes are JSON.
+type UserRow {
+	id: Str
+	displayName: Str
+	scopes: Str
+	organizationId: Str
+	createdAt: Float
+}
+
+query selectUser(token: Str): UserRow[dyn] {
+	SELECT id, display_name AS displayName, scopes,
+	       organization_id AS organizationId, created_at AS createdAt
+	FROM users WHERE token = {token}
+}
+
+query upsertUser(token: Str, id: Str, displayName: Str, scopes: Str, organizationId: Str, createdAt: Float): void {
+	INSERT INTO users (token, id, display_name, scopes, organization_id, created_at)
+	VALUES ({token}, {id}, {displayName}, {scopes}, {organizationId}, {createdAt})
+	ON CONFLICT (token) DO UPDATE SET
+		id = excluded.id,
+		display_name = excluded.display_name,
+		scopes = excluded.scopes,
+		organization_id = excluded.organization_id,
+		created_at = excluded.created_at
+}
+
+query deleteUsersCreatedBefore(cutoff: Float): void {
+	DELETE FROM users WHERE created_at < {cutoff}
+}
+
+func toUser(decoded: AuthenticatedUser): User {
+	createdAt := conv.itf(time.now()) / 1000.0
+	if decoded.isAdmin {
+		return User.SysAdmin(decoded.id, decoded.displayName, decoded.scopes, decoded.organizationId, createdAt)
+	}
+	return User.User(decoded.id, decoded.displayName, decoded.scopes, decoded.organizationId, createdAt)
+}
+
+func storeUser(db: sql.SqlConnection, token: Str, user: User): void {
+	// Don't store SysAdmins
+	if user is User.SysAdmin {
+		return
+	}
+	scopes := encode(user.scopes, json.codec())
+	_ := sql.run(db, upsertUser(token, user.id, user.displayName, scopes, user.organizationId, user.createdAt))
+}
+
+func getUserByAuthToken(db: sql.SqlConnection, authenticationUrl: Str, token: Str): Result<User, Bool> {
+	if sql.run(db, selectUser(token)) is Result.Ok([row, ..._]) {
+		return Result.Ok(User.User(row.id, row.displayName, environment.parseStringList(row.scopes), row.organizationId, row.createdAt))
+	}
+
+	request := net.HttpRequest("GET", authenticationUrl, [["Accept", "application/json"], ["Authorization", token]], "")
+
+	if net.httpRequest(request) is Result.Ok(response) && response.status == 200 && AuthenticatedUser.decode(response.body, json.codec()) is Result.Ok(decoded) {
+		user := toUser(decoded)
+		storeUser(db, token, user)
+		return Result.Ok(user)
+	}
+	return Result.Error(false)
+}
+
+// Deletes every user cached more than 24 hours ago.
+func deleteOldUsers(db: sql.SqlConnection): void {
+	cutoff := conv.itf(time.now()) / 1000.0 - 86400.0
+	_ := sql.run(db, deleteUsersCreatedBefore(cutoff))
+}

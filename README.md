@@ -15,7 +15,7 @@ The runtime is intentionally small:
 
 ## Environment Variables
 
-All configuration is read from environment variables, centralized in `src/webproxy_server/environment.gleam`.
+All configuration is read from environment variables, centralized in `src/environment.hive`.
 
 | Variable | Required | Default | Description |
 | --- | --- | --- | --- |
@@ -80,7 +80,7 @@ Users are partitioned into clusters using their `organization_id` and the client
 
 In practice, the current implementation hashes the pair `(organization_id, client IP address)` into a cluster id. Users only share cache traffic with peers that resolve to the same cluster id, so data never leaves the organization-and-network boundary that produced that cluster.
 
-If you need a different grouping rule, update the cluster id generation in `src/webproxy_server/cluster.gleam`.
+If you need a different grouping rule, update the cluster id generation in `src/cluster.hive`.
 
 ## HTTP Endpoints
 
@@ -108,7 +108,7 @@ Both endpoints are public, so the snapshot never includes IP addresses, user ids
 }
 ```
 
-`sessions` counts a cluster's members, which are keyed by user id. The page loads [three.js](https://threejs.org) from the jsDelivr CDN, so the viewer's browser needs internet access. The HTML lives in `src/webproxy_server_visual_page.erl` as a verbatim `~B"""` string, which requires Erlang/OTP 27 or newer.
+`sessions` counts a cluster's members, which are keyed by user id. The page loads [three.js](https://threejs.org) from the jsDelivr CDN, so the viewer's browser needs internet access. The HTML lives in `src/visualPage.hive` as one ordinary Hive string, served byte for byte. Inside it, only three characters are escaped: `\\` for a backslash, `\"` for a quote and `\{` for an opening brace, which would otherwise start an interpolation.
 
 ## Websocket Protocol
 
@@ -176,10 +176,44 @@ The request path is designed for cache sharing between nodes in the same organiz
 
 ## Development
 
+The server is written in [Hive](https://github.com/R0DR160HM/hive-lang), v0.3.8 or newer. Its state lives in in-memory SQLite databases (`src/database.hive`): one for the users, and sixteen for the clusters, so that clusters in different databases never wait on each other's writes. The live websocket connections are in a registry service (`src/ws.hive`).
+
 ```sh
-gleam run  # Run the project
-gleam test # Run the tests
+hive run src/main.hive    # Run the project
+hive test test            # Run the tests
+hive check src/main.hive  # Report any errors, build nothing
 ```
+
+### Benchmarks
+
+`bench/run.sh` puts the last Gleam version of this server and the Hive one under the same synthetic load, against a mock HTTPS authentication service, and prints both:
+
+```sh
+bench/run.sh -clients 500 -cluster 10 -duration 15s
+SERVERS=hive bench/run.sh -only request/provide               # one server, one timed scenario
+SERVERS=hive bench/run.sh -clients 100000 -active 10000       # 10,000 clusters, 10,000 of the connections busy
+```
+
+One run of the first on an 8-core Linux machine, which the load generator shares with the server:
+
+| scenario | Gleam | Hive |
+| --- | --- | --- |
+| subscribe, auth service called | 1,084 ops/s, p50 449 ms | 2,159 ops/s, p50 192 ms |
+| subscribe, user cached | 7,166 ops/s, p50 41 ms | 18,094 ops/s, p50 15 ms |
+| ping | 132,303 ops/s, p50 3.5 ms | 239,781 ops/s, p50 1.7 ms |
+| request/provide | 13,760 ops/s, p50 32 ms, 18 errors | 15,784 ops/s, p50 28 ms, 0 errors |
+| request nobody provides | 9,131 ops/s, p50 54 ms | 21,240 ops/s, p50 17 ms |
+| peak memory | 1,313 MB | 228 MB |
+
+And with many clusters of 10, where one connection in ten is busy and the rest stay connected:
+
+| connections | clusters | | request/provide | peak memory |
+| --- | --- | --- | --- | --- |
+| 50,000 | 5,000 | Gleam | 7,785 ops/s, p99 688 ms, 2,082 errors | 3.2 GB |
+| 50,000 | 5,000 | Hive | 14,498 ops/s, p99 934 ms, 0 errors | 2.9 GB |
+| 100,000 | 10,000 | Hive | 12,814 ops/s, p99 2.2 s, 0 errors | 5.1 GB |
+
+The 100,000 run pushed that machine into swap, so its numbers are a floor. Memory is what a large deployment has to plan for: about 50 KB a connection.
 
 ## How To Run
 
@@ -204,15 +238,15 @@ docker run --rm \
 
 Docker is the recommended way to run the service in production or in a test environment that should match the release image.
 
-### Gleam
+### Hive
 
-For local development, run the project directly with Gleam:
+For local development, run the project directly with Hive:
 
 ```sh
 export AUTHENTICATION_URL="https://your-auth-server.example.com/auth"
 export PORT=8080
 export AUTHORIZED_ADMINISTRATOR_IPS='["10.0.0.5"]'
-gleam run
+hive run src/main.hive
 ```
 
 If `PORT` is not set, the server falls back to `8080`. See [Environment Variables](#environment-variables) for the full list.

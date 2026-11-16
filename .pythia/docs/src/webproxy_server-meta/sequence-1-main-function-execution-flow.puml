@@ -1,0 +1,33 @@
+@startuml
+title Main Function Execution Flow
+
+participant main
+participant database
+participant mist
+participant webproxy_server
+participant router
+
+main -> database: new_user_table()
+main -> cluster: new_clusters_table()
+main -> engine: new_pending_resources_queue()
+main -> router: Database(users, clusters, pending_resources)
+
+main -> environment: port()
+
+alt Request Handling
+    main -> router: handle_request(_, db)
+    main -> mist: new
+    main -> mist: with_ipv6
+    main -> mist: bind("0.0.0.0")
+    main -> mist: port(port)
+    main -> mist: start
+else No Request Handling
+end
+
+main -> webproxy_server: warn_about_authorized_administrator_ips()
+
+main -> process: sleep(3_600_000)
+main -> database: delete_old_users_from_table(db.users)
+main -> main: start_garbage_collector(db)
+
+@enduml

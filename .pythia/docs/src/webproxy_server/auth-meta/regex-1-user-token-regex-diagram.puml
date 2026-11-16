@@ -1,0 +1,6 @@
+@startregex
+title User Token Regex Diagram
+
+^(?:(?:\{"id":"[^"]+","displayName":"[^"]+","scopes":\[\S+\],"organization_id":"[^"]+","created_at":[0-9]+\}|SysAdmin\{"id":"[^"]+","displayName":"[^"]+","scopes":\[\S+\],"organization_id":"[^"]+","created_at":[0-9]+\})$
+
+@endregex

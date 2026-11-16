@@ -1,0 +1,80 @@
+import ../src/auth
+import ../src/cluster
+import ../src/database
+
+query selectMembers(clusterId: Str): cluster.Member[dyn] {
+	SELECT user_id AS userId, conn_id AS connId
+	FROM members WHERE cluster_id = {clusterId}
+}
+
+func user(): auth.User {
+	return auth.User.User("123", "John Doe", ["read", "write"], "org1", 0.0)
+}
+
+test "join cluster" {
+	store := database.openStore(2)
+
+	Result.Ok(clusterId) := cluster.joinCluster(store, user(), "192.168.1.1", "conn-1") else {
+		Result.Error(why) { panic why }
+	}
+	assert cluster.findCluster(store, clusterId) is Result.Ok(_)
+	assert sql.run(database.shard(store, clusterId), selectMembers(clusterId)) == Result.Ok([cluster.Member("123", "conn-1")])
+}
+
+test "leave cluster" {
+	store := database.openStore(2)
+
+	Result.Ok(clusterId) := cluster.joinCluster(store, user(), "192.168.1.1", "conn-1") else {
+		Result.Error(why) { panic why }
+	}
+	cluster.leaveCluster(store, clusterId, user().id)
+	assert cluster.findCluster(store, clusterId) == Result.Error(false)
+}
+
+test "get connected peers" {
+	store := database.openStore(2)
+	ipAddress := "192.168.1.1"
+
+	Result.Ok(clusterId) := cluster.joinCluster(store, user(), ipAddress, "conn-1") else {
+		Result.Error(why) { panic why }
+	}
+
+	otherUser := auth.User.User("aabbcc", "Penelope", ["read", "write"], "org1", 0.0)
+	Result.Ok(secondClusterId) := cluster.joinCluster(store, otherUser, ipAddress, "conn-2") else {
+		Result.Error(why) { panic why }
+	}
+
+	assert clusterId == secondClusterId
+
+	otherIp := "192.168.1.2"
+	otherNetworkUser := auth.User.User("1010101", "Someone", ["read", "write"], "org1", 0.0)
+	Result.Ok(thirdClusterId) := cluster.joinCluster(store, otherNetworkUser, otherIp, "conn-3") else {
+		Result.Error(why) { panic why }
+	}
+
+	assert clusterId != thirdClusterId
+
+	otherOrgSameNetworkUser := auth.User.User("fdsadas", "Else", ["read", "write"], "2", 0.0)
+	Result.Ok(fourthClusterId) := cluster.joinCluster(store, otherOrgSameNetworkUser, otherIp, "conn-4") else {
+		Result.Error(why) { panic why }
+	}
+
+	assert clusterId != fourthClusterId
+	assert thirdClusterId != fourthClusterId
+
+	peers := cluster.getConnectedPeers(store, clusterId, user().id)
+	assert len(peers) == 1
+}
+
+// A cluster's rows are in the one database its id picks, and nowhere else.
+test "a cluster is kept in one database" {
+	store := database.openStore(2)
+
+	_ := sql.run(database.shard(store, "0-east"), cluster.insertCluster("0-east", "org1", "10.0.0.1"))
+
+	assert cluster.findCluster(store, "0-east") is Result.Ok(_)
+	// An id opening with `1` picks the other database, which never saw it.
+	assert sql.run(database.shard(store, "1-west"), cluster.selectCluster("0-east")) == Result.Ok([])
+	// Every id picks a database, a hash or not.
+	assert sql.run(database.shard(store, ""), cluster.selectCluster("0-east")) is Result.Ok([_])
+}

@@ -1,0 +1,22 @@
+@startuml
+title Database Interaction
+
+actor Router
+participant "Database" as DB
+participant "engine" as Engine
+participant "intervention" as Intervention
+participant "auth" as Auth
+
+Router -> DB: check user permissions
+Router -> DB: retrieve cluster metadata
+Router -> DB: process pending resources
+
+Router -> Engine: subscribe to user
+Router -> Engine: require resource
+Router -> Engine: provide data
+Router -> Engine: upgrade user
+Router -> Intervention: drop value
+Router -> Intervention: cluster info
+Router -> Intervention: force cache invalidation
+
+@enduml

@@ -1,0 +1,44 @@
+@startuml
+title WebSocket Connection Management
+
+participant Router
+participant Database
+participant Webserver
+participant Engine
+participant Intervention
+participant Auth
+
+Router->Webserver: handle_request(request, db)
+alt path is "ws"
+    Router->Webserver: mist.websocket(on_init, on_close, handler)
+    note over Webserver: on_init sets up WebSocket connection
+    note over Webserver: on_close handles connection closure
+    note over Webserver: handler manages incoming messages
+else path is anything else
+    Router->Webserver: web.not_found()
+end
+
+alt message is "ping"
+    Engine->Webserver: ping(conn, state)
+else message starts with "/s "
+    Engine->Webserver: subscribe(users, clusters, address, outbound, auth_token, conn)
+else message starts with "/r "
+    Engine->Webserver: require(clusters, pending_resources, cluster_id, user, ip_address, outbound, resource_name)
+else message starts with "/p "
+    Engine->Webserver: provide(clusters, pending_resources, cluster_id, user, ip_address, outbound, data)
+else message is "/upgrade"
+    Engine->Webserver: upgrade(user, ip_address, conn)
+else message starts with "/su-drop "
+    Intervention->Webserver: drop_value(users, clusters, pending_resources, conn, state, data)
+else message starts with "/su-clinfo "
+    Intervention->Webserver: cluster_info(users, clusters, conn, state, data)
+else message starts with "/su-invalidate "
+    Intervention->Webserver: force_cache_invalidation(users, clusters, conn, state, data)
+else message is SendText(text)
+    Webserver->Webserver: send_text_frame(conn, text)
+else message is Closed or Shutdown
+    Webserver->Webserver: stop()
+else
+    Webserver->Webserver: continue(state)
+end
+@enduml

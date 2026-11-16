@@ -1,0 +1,12 @@
+@startuml
+title User
+
+class User {
+  +id: String
+  +display_name: String
+  +scopes: List[String]
+  +organization_id: String
+  +created_at: Float
+}
+
+@enduml

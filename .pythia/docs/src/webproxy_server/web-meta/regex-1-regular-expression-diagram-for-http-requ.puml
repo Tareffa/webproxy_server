@@ -1,0 +1,11 @@
+@startregex
+title Regular Expression Diagram for http_request
+
+```
+^GET|POST|PUT|DELETE|PATCH / [^\s]+ HTTP/1\.1
+Host: [^\s]+
+(?:\r\n[^\s].+:\s.+)*
+\r\n$
+```
+
+@endregex

@@ -1,0 +1,271 @@
+// Privileged commands available only to connections that have entered
+// intervention mode (see `engine.upgrade`). Every public function in this
+// module performs a SysAdmin-only operation and must only be reachable from
+// the `ws.WsState.Intervention` state.
+
+import ./cluster
+import ./database
+import ./engine
+import ./ws
+
+query deleteUsersByDisplayName(displayName: Str): void {
+	DELETE FROM users WHERE display_name = {displayName}
+}
+
+query deleteCluster(id: Str): void {
+	DELETE FROM clusters WHERE id = {id}
+}
+
+query deleteClusterMembers(clusterId: Str): void {
+	DELETE FROM members WHERE cluster_id = {clusterId}
+}
+
+query selectClusters(): cluster.Cluster[dyn] {
+	SELECT id, organization_id AS organizationId, ip_address AS ipAddress
+	FROM clusters ORDER BY id
+}
+
+query selectClustersWithUser(displayName: Str): cluster.Cluster[dyn] {
+	SELECT id, organization_id AS organizationId, ip_address AS ipAddress
+	FROM clusters
+	WHERE id IN (SELECT cluster_id FROM members WHERE display_name = {displayName})
+	ORDER BY id
+}
+
+query selectMemberNames(clusterId: Str): Str[dyn] {
+	SELECT display_name FROM members WHERE cluster_id = {clusterId} ORDER BY user_id
+}
+
+query selectAllConnIds(): Str[dyn] {
+	SELECT conn_id FROM members
+}
+
+query selectUserConnIds(displayName: Str): Str[dyn] {
+	SELECT conn_id FROM members WHERE display_name = {displayName}
+}
+
+query selectClusterConnIds(clusterId: Str): Str[dyn] {
+	SELECT conn_id FROM members WHERE cluster_id = {clusterId}
+}
+
+// Answers an intervention command with the message to send back to the
+// operator, or with an error when `message` is not one. Separated from the
+// socket I/O so that which message reaches which command can be tested.
+func answer(store: database.Store, connections: Address<ws.Registry>, message: Str): Result<Str, Bool> {
+	switch message {
+		"/su-drop {data}" { return Result.Ok(drop(store, data)) }
+		"/su-clinfo" { return Result.Ok(clusterReport(store, "")) }
+		"/su-clinfo {data}" { return Result.Ok(clusterReport(store, data)) }
+		"/su-invalidate {data}" { return Result.Ok(invalidateResource(store, connections, data)) }
+		_ { return Result.Error(false) }
+	}
+}
+
+// Handles the `/su-drop <table> <value>` command: deletes a single value from
+// one of the tables. Returns the message to send back to the operator.
+//
+// - `users`: `<value>` is the user's `display_name`, NOT their id or auth
+//   token. Every stored user matching the display name is removed.
+// - `clusters`: `<value>` is a cluster id.
+// - `pending_resources`: `<value>` is a pending resource id.
+func drop(store: database.Store, data: Str): Str {
+	switch data {
+		"users {displayName}" {
+			count := dropUsersByDisplayName(store.users, displayName)
+			if count == 0 {
+				return "No user found with display name {displayName}"
+			}
+			return "Dropped {count} user(s) with display name {displayName}"
+		}
+		"clusters {clusterId}" {
+			db := database.shard(store, clusterId)
+			_ := sql.run(db, deleteClusterMembers(clusterId))
+			return dropReport(sql.run(db, deleteCluster(clusterId)), "cluster", clusterId)
+		}
+		"pending_resources {resourceId}" {
+			return dropReport(dropPendingResource(store, resourceId), "pending resource", resourceId)
+		}
+		_ {
+			return "Invalid command. Usage: /su-drop <table> <value>"
+		}
+	}
+}
+
+// Handles the `/su-clinfo` command, reporting each cluster's id, ip address,
+// organization and the display names of its members.
+//
+// - `/su-clinfo` reports every cluster.
+// - `/su-clinfo <cluster_id>` reports only that cluster.
+// - `/su-clinfo user <display_name>` reports only the clusters the user with
+//   that display name belongs to.
+func clusterReport(store: database.Store, data: Str): Str {
+	switch data {
+		"" { return formatClusters(store, allClusters(store)) }
+		"user {displayName}" { return formatClusters(store, clustersWithUser(store, displayName)) }
+		_ { return formatClusters(store, oneCluster(store, data)) }
+	}
+}
+
+// Handles the `/su-invalidate <resource_name>` command, pushing a
+// `/d <resource_name>` frame to live connections so they evict the cached
+// resource. Returns the message to send back to the operator.
+//
+// - `/su-invalidate <resource_name>` targets every connection.
+// - `/su-invalidate <resource_name> user <display_name>` targets only the
+//   connections of users with that display name.
+// - `/su-invalidate <resource_name> cluster <cluster_id>` targets only the
+//   connections in that cluster.
+//
+// No part may hold a space: a hole with no literal after it would take the
+// rest of the line, so `a b c d` would be a resource rather than an error.
+func invalidateResource(store: database.Store, connections: Address<ws.Registry>, data: Str): Str {
+	switch data {
+		"{resourceName is (\S*)} user {displayName is (\S*)}" {
+			count := invalidate(connections, userConnIds(store, displayName), resourceName)
+			return report(count, resourceName, "user {displayName}")
+		}
+		"{resourceName is (\S*)} cluster {clusterId is (\S*)}" {
+			count := invalidate(connections, clusterConnIds(store, clusterId), resourceName)
+			return report(count, resourceName, "cluster {clusterId}")
+		}
+		"{resourceName is (\S*)}" {
+			count := invalidate(connections, allConnIds(store), resourceName)
+			return report(count, resourceName, "all connections")
+		}
+		_ {
+			return "Invalid command. Usage: /su-invalidate <resource_name> [user <display_name> | cluster <cluster_id>]"
+		}
+	}
+}
+
+// Sends `message` over the socket and stays in the current state. This is the
+// only part of each command that cannot be exercised in a unit test, so the
+// commands above return their message instead of sending it.
+func reply(conn: net.WsConnection, state: ws.WsState, message: Str): ws.Next {
+	_ := net.wsSend(conn, message)
+	return ws.Next.Continue(state)
+}
+
+// Sends a `/d <resource_name>` frame to every given connection and returns how
+// many were notified.
+func invalidate(connections: Address<ws.Registry>, connIds: Str[dyn], resourceName: Str): Int {
+	ws.deliver(connections, connIds, "/d {resourceName}")
+	return len(connIds)
+}
+
+func report(count: Int, resourceName: Str, scope: Str): Str {
+	return "Invalidated {resourceName} on {count} connection(s) ({scope})."
+}
+
+// What every one of the clusters' databases answers a query with, together.
+// An admin command that names no cluster has to ask them all.
+func connIdsEverywhere(store: database.Store, asked: sql.Fragment<Str[dyn]>): Str[dyn] {
+	mut Str[dyn] connIds = []
+	for each db in store.clusters {
+		if sql.run(db, asked) is Result.Ok(found) {
+			for each connId in found {
+				append(connIds, connId)
+			}
+		}
+	}
+	return connIds
+}
+
+// The same for clusters, ordered by id as one database would have them.
+func clustersEverywhere(store: database.Store, asked: sql.Fragment<cluster.Cluster[dyn]>): cluster.Cluster[dyn] {
+	mut cluster.Cluster[dyn] clusters = []
+	for each db in store.clusters {
+		if sql.run(db, asked) is Result.Ok(found) {
+			for each one in found {
+				append(clusters, one)
+			}
+		}
+	}
+	return sort(clusters)
+}
+
+// The connection ids of every connection in every cluster.
+func allConnIds(store: database.Store): Str[dyn] {
+	return connIdsEverywhere(store, selectAllConnIds())
+}
+
+// The connection ids of every connection belonging to a user with the given
+// display name, across all clusters.
+func userConnIds(store: database.Store, displayName: Str): Str[dyn] {
+	return connIdsEverywhere(store, selectUserConnIds(displayName))
+}
+
+// The connection ids of every connection in a single cluster.
+func clusterConnIds(store: database.Store, clusterId: Str): Str[dyn] {
+	if sql.run(database.shard(store, clusterId), selectClusterConnIds(clusterId)) is Result.Ok(connIds) {
+		return connIds
+	}
+	return []
+}
+
+// Every stored cluster.
+func allClusters(store: database.Store): cluster.Cluster[dyn] {
+	return clustersEverywhere(store, selectClusters())
+}
+
+// A single cluster looked up by id, as a (possibly empty) list so it shares the
+// formatting path with the other lookups.
+func oneCluster(store: database.Store, clusterId: Str): cluster.Cluster[dyn] {
+	if cluster.findCluster(store, clusterId) is Result.Ok(found) {
+		return [found]
+	}
+	return []
+}
+
+// Every cluster that contains at least one user with the given display name.
+func clustersWithUser(store: database.Store, displayName: Str): cluster.Cluster[dyn] {
+	return clustersEverywhere(store, selectClustersWithUser(displayName))
+}
+
+func formatClusters(store: database.Store, clusters: cluster.Cluster[dyn]): Str {
+	if len(clusters) == 0 {
+		return "No clusters found."
+	}
+	return join(map(clusters, formatCluster(store, _)), "\n\n")
+}
+
+// ponytail: one query per cluster for its members' names; fold them into the
+// cluster query with `group_concat` if a full report ever takes too long.
+func formatCluster(store: database.Store, found: cluster.Cluster): Str {
+	mut Str[dyn] names = []
+	if sql.run(database.shard(store, found.id), selectMemberNames(found.id)) is Result.Ok(rows) {
+		names = rows
+	}
+	return "Cluster {found.id}\n  Organization: {found.organizationId}\n  IP: {found.ipAddress}\n  Users: {join(names, ", ")}"
+}
+
+// A pending resource's id does not say which cluster asked for it, so every
+// database is told to drop it.
+func dropPendingResource(store: database.Store, resourceId: Str): Result<Int, sql.SqlError> {
+	mut dropped := 0
+	for each db in store.clusters {
+		outcome := sql.run(db, engine.deletePendingResource(resourceId))
+		if outcome is Result.Ok(count) {
+			dropped = dropped + count
+		} else {
+			return outcome
+		}
+	}
+	return Result.Ok(dropped)
+}
+
+func dropReport(outcome: Result<Int, sql.SqlError>, label: Str, value: Str): Str {
+	if outcome is Result.Ok(_) {
+		return "Dropped {label} {value}"
+	}
+	return "Unable to drop {label} {value}"
+}
+
+// Users are keyed by their auth token, so they are deleted by display name
+// with a statement of their own. Returns the number of users removed.
+func dropUsersByDisplayName(db: sql.SqlConnection, displayName: Str): Int {
+	if sql.run(db, deleteUsersByDisplayName(displayName)) is Result.Ok(count) {
+		return count
+	}
+	return 0
+}

@@ -1,0 +1,16 @@
+@startuml
+title Deployment Diagram for WebSocket Server
+
+package "WebSocket Server" {
+  component "Webproxy Server"
+}
+
+database "Users Database"
+database "Clusters Database"
+database "Pending Resources Database"
+
+Webproxy Server --> Users Database : Uses
+Webproxy Server --> Clusters Database : Uses
+Webproxy Server --> Pending Resources Database : Uses
+
+@enduml

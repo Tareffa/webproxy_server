@@ -1,0 +1,20 @@
+@startuml
+title Auth
+
+class User {
+  +id: String
+  +display_name: String
+  +scopes: List[String]
+  +organization_id: String
+  +created_at: Float
+}
+
+class Auth {
+  +new_user_table(): Table
+  +get_user_by_auth_token(Table, String): Result[User, Error]
+}
+
+database -> auth : upsert(token, user)
+auth -> database : get_user_by_auth_token
+
+@enduml

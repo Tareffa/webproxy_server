@@ -1,0 +1,88 @@
+// The `/info/visual` dashboard: a static page that draws the clusters and
+// their live sessions in 3D, polling `/info/visual/data` for fresh snapshots.
+//
+// Both endpoints are public, so the snapshot is anonymized: cluster and
+// organization ids are replaced by keyed hashes (see `anonymize`), and no IP
+// addresses, user ids or display names ever leave the server.
+
+import ./database
+import ./visualPage
+
+// A cluster as published by `/info/visual/data`. `sessions` counts the
+// cluster's members, which are keyed by user id.
+type ClusterSummary {
+	id: Str
+	organization: Str
+	sessions: Int
+}
+
+// What `/info/visual/data` answers with.
+type Snapshot {
+	sessionCount: Int
+	clusters: ClusterSummary[dyn]
+}
+
+// A cluster as it is stored, with its members counted.
+type ClusterSize {
+	id: Str
+	organizationId: Str
+	sessions: Int
+}
+
+query selectClusterSizes(): ClusterSize[dyn] {
+	SELECT clusters.id AS id, clusters.organization_id AS organizationId,
+	       COUNT(members.user_id) AS sessions
+	FROM clusters LEFT JOIN members ON members.cluster_id = clusters.id
+	GROUP BY clusters.id, clusters.organization_id
+}
+
+// Serves the visualization page.
+func page(): net.HttpResponse {
+	return net.HttpResponse(200, [["Content-Type", "text/html; charset=utf-8"], ["Cache-Control", "no-cache"]], visualPage.html())
+}
+
+// Serves the anonymized snapshot polled by the page:
+//
+//     {
+//       "sessionCount": 5,
+//       "clusters": [{ "id": "3fa9c1d2e0", "organization": "9b8a7c6d5e", "sessions": 5 }]
+//     }
+func data(store: database.Store, anonymizationKey: Secret<Str>): net.HttpResponse {
+	return net.HttpResponse(200, [["Content-Type", "application/json"], ["Cache-Control", "no-store"]], encode(snapshot(store, anonymizationKey), json.codec()))
+}
+
+func snapshot(store: database.Store, anonymizationKey: Secret<Str>): Snapshot {
+	summaries := summarize(store, anonymizationKey)
+	mut sessionCount := 0
+	for each summary in summaries {
+		sessionCount = sessionCount + summary.sessions
+	}
+	return Snapshot(sessionCount, summaries)
+}
+
+// Every stored cluster, in every one of the clusters' databases, with its ids
+// anonymized and its members counted.
+func summarize(store: database.Store, anonymizationKey: Secret<Str>): ClusterSummary[dyn] {
+	mut ClusterSummary[dyn] summaries = []
+	for each db in store.clusters {
+		if sql.run(db, selectClusterSizes()) is Result.Ok(sizes) {
+			for each size in sizes {
+				append(summaries, ClusterSummary(anonymize(anonymizationKey, "cluster", size.id), anonymize(anonymizationKey, "organization", size.organizationId), size.sessions))
+			}
+		}
+	}
+	return summaries
+}
+
+// Cluster ids are an unsalted hash of `(organization_id, ip_address)`, so
+// publishing them (even truncated) next to the organization would let anyone
+// recover the IP by brute force. Instead, both ids are replaced by an HMAC
+// under a key generated at boot. The result stays stable for the life of the
+// process, so the page can animate changes, but means nothing outside it.
+func anonymize(key: Secret<Str>, kind: Str, value: Str): Str {
+	digest := crypto.hmacSha256("{kind}:{value}", key)
+	if digest bounds 9 {
+		return digest[0:9]
+	}
+	return digest
+}

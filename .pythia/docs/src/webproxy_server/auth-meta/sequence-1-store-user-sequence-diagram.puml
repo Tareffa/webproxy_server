@@ -1,0 +1,21 @@
+@startuml
+title Store User Sequence Diagram
+
+participant WebProxyServer
+participant Database
+participant Cache
+participant HTTPClient
+
+WebProxyServer -> Cache: store_user(token, user)
+alt User is not a SysAdmin
+  Cache -> Database: upsert(token, user)
+end
+WebProxyServer -> HTTPClient: prepare_auth_request(token)
+HTTPClient -> WebProxyServer: send request to authentication_url
+alt Response status == 200
+  WebProxyServer -> Cache: store_user(token, user)
+else Other response status
+  WebProxyServer --> WebProxyServer: Error(Nil)
+end
+
+@enduml

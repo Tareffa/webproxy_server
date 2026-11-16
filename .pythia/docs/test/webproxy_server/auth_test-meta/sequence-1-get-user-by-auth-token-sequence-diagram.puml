@@ -1,0 +1,20 @@
+@startuml
+title get_user_by_auth_token Sequence Diagram
+
+participant cache as User Table
+participant database
+participant envoy
+
+User Table -> database: upsert("other_token", user1)
+User Table -> database: upsert(token, user2)
+
+User Table -> envoy: set("AUTHENTICATION_URL", "https://rhm.dev")
+envoy -> User Table: get_user_by_auth_token(token)
+User Table -> database: lookup(token)
+database -> User Table: return(user2)
+
+User Table -> envoy: get_user_by_auth_token(other_token)
+User Table -> database: lookup("other_token")
+database -> User Table: return(user1)
+
+@enduml

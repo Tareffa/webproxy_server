@@ -1,0 +1,13 @@
+@startuml
+title Healthcheck Sequence Diagram
+
+participant "healthcheck.sh" as Script
+participant Application
+participant Server
+
+Script -> Application: exec wget --spider --quiet 'http://127.0.0.1:8080'
+Application -> Server: HTTP GET / (port 8080)
+Server -> Application: HTTP Response Code 200
+Application -> Script: Return code 0
+
+@enduml

@@ -1,0 +1,44 @@
+@startuml
+title Pending Resource Data Class Diagram
+
+class database.Table(a) {
+  +transaction(ref: a): Result[Ref]
+  +select(ref: a, select_fn: fn(a)): List[a]
+  +find(ref: a, id: String): Result[a]
+  +delete(ref: a, id: String): Result[Unit]
+}
+
+class auth.User {
+  +id: String
+  +display_name: String
+  +scopes: List[String]
+  +organization_id: String
+  +created_at: Float
+}
+
+class Cluster {
+  +id: String
+  +ip_address: String
+  +organization_id: String
+  +members: Dict[String, String]
+}
+
+class engine.PendingResource {
+  +id: String
+  +resource_name: String
+  +data: String
+}
+
+class ws.WsState {}
+class mist.WebsocketConnection {}
+class process.Subject(a) {}
+
+database.Table(auth.User).<|-- auth.User
+database.Table(Cluster).<|-- Cluster
+database.Table(engine.PendingResource).<|-- engine.PendingResource
+
+ws.WsState.--> reply
+mist.WebsocketConnection.--> reply
+process.Subject(ws.WsCommand).<|-- invalidate
+
+@enduml

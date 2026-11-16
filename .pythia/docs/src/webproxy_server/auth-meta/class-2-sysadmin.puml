@@ -1,0 +1,22 @@
+@startuml
+title SysAdmin
+
+class User {
+  +id: String
+  +display_name: String
+  +scopes: List(String)
+  +organization_id: String
+  +created_at: Float
+}
+
+class SysAdmin << (S, #Green) >> {
+  +id: String
+  +display_name: String
+  +scopes: List(String)
+  +organization_id: String
+  +created_at: Float
+}
+
+User <|-- SysAdmin
+
+@enduml

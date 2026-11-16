@@ -1,0 +1,10 @@
+@startuml
+title WebProxyServerModule
+
+class webproxy_server {
+    +resolve_ip_address(request: request.Request(mist.Connection)): Result(String, Nil)
+    +not_found(): response.Response(mist.ResponseData)
+    +set_body(resp: response.Response(a), body: String): response.Response(mist.ResponseData)
+    +health(): response.Response(mist.ResponseData)
+}
+@enduml

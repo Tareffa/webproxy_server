@@ -1,0 +1,40 @@
+@startuml
+title WebProxyServer
+
+class WebProxyServer {
+  +main(): Nil
+  -warn_about_authorized_administrator_ips(): Nil
+  -start_garbage_collector(db: router.Database): Nil
+}
+
+class auth {
+  +new_user_table(): database.Table(auth.User)
+}
+
+class cluster {
+  +new_clusters_table(): List(cluster.Cluster)
+}
+
+class engine {
+  +new_pending_resources_queue(): List(engine.Resource)
+}
+
+class router {
+  +Database(users: database.Table(auth.User), clusters: List(cluster.Cluster), pending_resources: List(engine.Resource))
+  +handle_request(_, db): _
+}
+
+class mist {
+  +new(): _
+  +with_ipv6(): _
+  +bind(ip: String): _
+  +port(port: Int): _
+  +start(): _
+}
+
+WebProxyServer --> auth : uses
+WebProxyServer --> cluster : uses
+WebProxyServer --> engine : uses
+WebProxyServer --> router : uses
+router --> mist : creates
+@enduml

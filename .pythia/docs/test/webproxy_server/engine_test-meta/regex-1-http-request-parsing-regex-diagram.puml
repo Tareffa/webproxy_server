@@ -1,0 +1,13 @@
+@startregex
+title HTTP Request Parsing Regex Diagram
+
+# HTTP Method
+GET|POST|PUT|DELETE|HEAD|OPTIONS|PATCH
+
+# Headers
+[^\r\n]+:[^\r\n]*
+
+# Body
+.+
+
+@endregex

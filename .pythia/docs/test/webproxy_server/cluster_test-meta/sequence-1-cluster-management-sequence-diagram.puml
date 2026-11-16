@@ -1,0 +1,35 @@
+@startuml
+title Cluster Management Sequence Diagram
+
+participant "User" as User
+participant "ClusterManager" as ClusterManager
+participant "Database" as Database
+
+User ->> ClusterManager: join_cluster(table, user, ip_address, outbound)
+activate ClusterManager
+Activate Database
+ClusterManager ->> Database: find(ref, cluster_id)
+Database --> ClusterManager: Ok(cluster)
+deactivate Database
+ClusterManager ->> User: Ok(cluster_id)
+deactivate ClusterManager
+
+User ->> ClusterManager: leave_cluster(table, cluster_id, user.id)
+activate ClusterManager
+Activate Database
+ClusterManager ->> Database: find(ref, cluster_id)
+Database --> ClusterManager: Error(database.Operation(database.NotFound))
+deactivate Database
+ClusterManager ->> User: Ok(Nil)
+deactivate ClusterManager
+
+User ->> ClusterManager: get_connected_peers(table, cluster_id, user.id)
+activate ClusterManager
+Activate Database
+ClusterManager ->> Database: find(ref, cluster_id)
+Database --> ClusterManager: Ok(cluster)
+deactivate Database
+ClusterManager ->> User: dict.size(peers) == 1
+deactivate ClusterManager
+
+@enduml

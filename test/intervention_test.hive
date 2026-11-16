@@ -1,0 +1,289 @@
+import ../src/auth
+import ../src/cluster
+import ../src/database
+import ../src/intervention
+import ../src/ws
+
+// --- helpers ---------------------------------------------------------------
+
+query allDisplayNames(): Str[dyn] {
+	SELECT display_name FROM users ORDER BY display_name
+}
+
+func insertUser(db: sql.SqlConnection, token: Str, id: Str, displayName: Str): void {
+	auth.storeUser(db, token, auth.User.User(id, displayName, [], "org", 0.0))
+}
+
+// Two databases for the clusters, so a command that names none has more than
+// one to ask: a cluster whose id opens with `0` is in the first of them, and
+// one whose id opens with `1` in the second.
+func open(): database.Store {
+	return database.openStore(2)
+}
+
+// A user in a cluster, on the connection `conn-<user id>`.
+type Joined {
+	userId: Str
+	displayName: Str
+}
+
+func insertCluster(store: database.Store, id: Str, organizationId: Str, ipAddress: Str, members: Joined[dyn]): void {
+	db := database.shard(store, id)
+	_ := sql.run(db, cluster.insertCluster(id, organizationId, ipAddress))
+	for each member in members {
+		_ := sql.run(db, cluster.upsertMember(id, member.userId, "conn-{member.userId}", member.displayName))
+	}
+}
+
+// The sorted display names of every stored user, for asserting deletions.
+func displayNames(db: sql.SqlConnection): Str[dyn] {
+	if sql.run(db, allDisplayNames()) is Result.Ok(names) {
+		return names
+	}
+	return []
+}
+
+func contains(text: Str, part: Str): Bool {
+	return indexOf(text, part) is Result.Ok(_)
+}
+
+// An outbox that keeps every text it is sent instead of writing to a socket,
+// answering any message with all of them.
+proc recorder(seen: mut Str[dyn], command: ws.WsCommand): ws.WsCommand {
+	if command is ws.WsCommand.SendText(text) {
+		append(seen, text)
+	}
+	return ws.WsCommand.Sent(seen)
+}
+
+// A recording outbox registered as the live connection `connId`.
+func connect(connections: Address<ws.Registry>, connId: Str): Address<ws.WsCommand> {
+	Str[dyn] empty = []
+	Result.Ok(box) := spawn(recorder, empty) else {
+		Result.Error(why) { panic why }
+	}
+	_ := connections(ws.Registry.Register(connId, box))
+	return box
+}
+
+// Everything `box` has been sent. The registry is asked for nothing first, and
+// waited for: it answers once it is through what was posted to it before.
+func received(connections: Address<ws.Registry>, box: Address<ws.WsCommand>): Str[dyn] {
+	_ := connections(ws.Registry.Deliver([], ""))
+	if box(ws.WsCommand.Sent([])) is Result.Ok(ws.WsCommand.Sent(texts)) {
+		return texts
+	}
+	return []
+}
+
+// --- answer ----------------------------------------------------------------
+
+// `/su-clinfo` on its own reports every cluster. The Gleam router asked for a
+// space after it, so the bare command the README documents answered nothing.
+test "bare su-clinfo reports every cluster" {
+	store := open()
+	connections := ws.startRegistry()
+
+	insertCluster(store, "0-east", "org1", "10.0.0.1", [])
+	insertCluster(store, "1-west", "org2", "10.0.0.2", [])
+
+	Result.Ok(report) := intervention.answer(store, connections, "/su-clinfo") else {
+		Result.Error(_) { panic "`/su-clinfo` was not taken as a command" }
+	}
+	assert contains(report, "Cluster 0-east")
+	assert contains(report, "Cluster 1-west")
+}
+
+test "each intervention command reaches its handler" {
+	store := open()
+	connections := ws.startRegistry()
+
+	insertCluster(store, "cl-1", "org1", "10.0.0.1", [])
+
+	assert intervention.answer(store, connections, "/su-clinfo cl-1") == Result.Ok(intervention.clusterReport(store, "cl-1"))
+	assert intervention.answer(store, connections, "/su-clinfo nope") == Result.Ok("No clusters found.")
+	assert intervention.answer(store, connections, "/su-invalidate cache1") == Result.Ok("Invalidated cache1 on 0 connection(s) (all connections).")
+	assert intervention.answer(store, connections, "/su-drop clusters cl-1") == Result.Ok("Dropped cluster cl-1")
+	// Anything else is not a command, and neither is one run into its argument.
+	assert intervention.answer(store, connections, "/r resource") == Result.Error(false)
+	assert intervention.answer(store, connections, "/su-clinfocl-1") == Result.Error(false)
+}
+
+// --- drop ------------------------------------------------------------------
+
+test "drop users" {
+	store := open()
+
+	insertUser(store.users, "tok-a", "id-a", "alice")
+	insertUser(store.users, "tok-a2", "id-a2", "alice")
+	insertUser(store.users, "tok-b", "id-b", "bob")
+
+	reply := intervention.drop(store, "users alice")
+	assert reply == "Dropped 2 user(s) with display name alice"
+	assert displayNames(store.users) == ["bob"]
+}
+
+test "drop users none" {
+	store := open()
+
+	insertUser(store.users, "tok-b", "id-b", "bob")
+
+	reply := intervention.drop(store, "users alice")
+	assert reply == "No user found with display name alice"
+	assert displayNames(store.users) == ["bob"]
+}
+
+test "drop cluster" {
+	store := open()
+
+	insertCluster(store, "cl-1", "org1", "10.0.0.1", [])
+
+	reply := intervention.drop(store, "clusters cl-1")
+	assert reply == "Dropped cluster cl-1"
+
+	assert cluster.findCluster(store, "cl-1") == Result.Error(false)
+}
+
+test "drop pending resource" {
+	store := open()
+
+	reply := intervention.drop(store, "pending_resources res-1")
+	assert reply == "Dropped pending resource res-1"
+}
+
+test "drop invalid" {
+	store := open()
+
+	reply := intervention.drop(store, "bogus thing")
+	assert reply == "Invalid command. Usage: /su-drop <table> <value>"
+}
+
+// --- cluster_report --------------------------------------------------------
+
+test "cluster report all" {
+	store := open()
+
+	insertCluster(store, "cl-1", "org1", "10.0.0.1", [Joined("id-a", "alice"), Joined("id-b", "bob")])
+
+	report := intervention.clusterReport(store, "")
+	assert contains(report, "Cluster cl-1")
+	assert contains(report, "Organization: org1")
+	assert contains(report, "IP: 10.0.0.1")
+	assert contains(report, "alice")
+	assert contains(report, "bob")
+}
+
+test "cluster report single" {
+	store := open()
+
+	insertCluster(store, "0-east", "org1", "10.0.0.1", [])
+	insertCluster(store, "1-west", "org2", "10.0.0.2", [])
+
+	report := intervention.clusterReport(store, "1-west")
+	assert contains(report, "Cluster 1-west")
+	assert contains(report, "Cluster 0-east") == false
+}
+
+test "cluster report by user" {
+	store := open()
+
+	insertCluster(store, "0-east", "org1", "10.0.0.1", [Joined("id-b", "bob")])
+	insertCluster(store, "1-west", "org2", "10.0.0.2", [Joined("id-a", "alice")])
+
+	report := intervention.clusterReport(store, "user alice")
+	assert contains(report, "Cluster 1-west")
+	assert contains(report, "Cluster 0-east") == false
+}
+
+test "cluster report missing" {
+	store := open()
+
+	report := intervention.clusterReport(store, "does-not-exist")
+	assert report == "No clusters found."
+}
+
+// --- invalidate_resource ---------------------------------------------------
+
+test "invalidate all" {
+	store := open()
+	connections := ws.startRegistry()
+
+	subA := connect(connections, "conn-id-a")
+	subB := connect(connections, "conn-id-b")
+	insertCluster(store, "0-east", "o", "i", [Joined("id-a", "alice")])
+	insertCluster(store, "1-west", "o", "i", [Joined("id-b", "bob")])
+
+	reply := intervention.invalidateResource(store, connections, "cache1")
+	assert reply == "Invalidated cache1 on 2 connection(s) (all connections)."
+	assert received(connections, subA) == ["/d cache1"]
+	assert received(connections, subB) == ["/d cache1"]
+}
+
+test "invalidate user" {
+	store := open()
+	connections := ws.startRegistry()
+
+	subA := connect(connections, "conn-id-a")
+	subB := connect(connections, "conn-id-b")
+	insertCluster(store, "cl-1", "o", "i", [Joined("id-a", "alice"), Joined("id-b", "bob")])
+
+	reply := intervention.invalidateResource(store, connections, "cache1 user alice")
+	assert reply == "Invalidated cache1 on 1 connection(s) (user alice)."
+	// Only alice's connection is notified.
+	assert received(connections, subA) == ["/d cache1"]
+	assert len(received(connections, subB)) == 0
+}
+
+test "invalidate cluster" {
+	store := open()
+	connections := ws.startRegistry()
+
+	subA := connect(connections, "conn-id-a")
+	subB := connect(connections, "conn-id-b")
+	insertCluster(store, "0-east", "o", "i", [Joined("id-a", "alice")])
+	insertCluster(store, "1-west", "o", "i", [Joined("id-b", "bob")])
+
+	reply := intervention.invalidateResource(store, connections, "cache1 cluster 0-east")
+	assert reply == "Invalidated cache1 on 1 connection(s) (cluster 0-east)."
+	// Only the targeted cluster is notified.
+	assert received(connections, subA) == ["/d cache1"]
+	assert len(received(connections, subB)) == 0
+}
+
+test "invalidate invalid" {
+	store := open()
+	connections := ws.startRegistry()
+
+	reply := intervention.invalidateResource(store, connections, "a b c d")
+	assert reply == "Invalid command. Usage: /su-invalidate <resource_name> [user <display_name> | cluster <cluster_id>]"
+}
+
+// --- lookups ---------------------------------------------------------------
+
+// Confirms users are matched by display name, not by id or auth token: both
+// "alice" members match, each under its own id and in its own database, and
+// "bob" does not.
+test "user connections by display name" {
+	store := open()
+
+	insertCluster(store, "0-east", "org", "10.0.0.1", [Joined("id-a", "alice"), Joined("id-b", "bob")])
+	insertCluster(store, "1-west", "org2", "10.0.0.2", [Joined("id-a2", "alice")])
+
+	assert sort(intervention.userConnIds(store, "alice")) == ["conn-id-a", "conn-id-a2"]
+}
+
+// Confirms every stored cluster is listed, members or not, whichever database
+// it is in, and in the order of their ids.
+test "all clusters" {
+	store := open()
+
+	insertCluster(store, "1-west", "org2", "10.0.0.2", [])
+	insertCluster(store, "0-east", "org1", "10.0.0.1", [])
+	insertCluster(store, "2-north", "org3", "10.0.0.3", [])
+
+	assert map(intervention.allClusters(store), clusterIdOf) == ["0-east", "1-west", "2-north"]
+}
+
+func clusterIdOf(found: cluster.Cluster): Str {
+	return found.id
+}

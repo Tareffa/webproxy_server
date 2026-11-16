@@ -1,0 +1,123 @@
+import ../src/auth
+import ../src/cluster
+import ../src/database
+import ../src/engine
+import ../src/ottimizza
+import ../src/ws
+
+// --- helpers ---------------------------------------------------------------
+
+func counts(counter: Address<ottimizza.Stats>): ottimizza.Stats {
+	if counter(ottimizza.Stats.Read()) is Result.Ok(answer) {
+		return answer
+	}
+	panic "the statistics service did not answer"
+}
+
+func context(store: database.Store, counter: Address<ottimizza.Stats>): ws.Context {
+	return ws.Context(store, ws.startRegistry(), "http://localhost:8080/auth_relay", [], false, bypass("key"), counter)
+}
+
+func userInfo(kind: Int): Str {
+	return "\{\"record\":\{\"id\":42,\"username\":\"ada\",\"type\":{kind},\"organization\":\{\"id\":7,\"name\":\"Acme\"},\"email\":\"ada@example.com\"}}"
+}
+
+// --- authentication relay ---------------------------------------------------
+
+test "each kind of Ottimizza user has its scopes" {
+	assert ottimizza.scopesOf(0) == ["*", "admin"]
+	assert ottimizza.scopesOf(1) == ["*"]
+	assert ottimizza.scopesOf(2) == ["*"]
+	assert ottimizza.scopesOf(7) == ["*", "admin", "analyst"]
+	assert ottimizza.scopesOf(8) == ["*", "admin", "analyst", "leader"]
+	assert ottimizza.scopesOf(9) == ["*", "admin", "analyst", "leader", "techleader"]
+	assert len(ottimizza.scopesOf(3)) == 0
+}
+
+test "the relay answers with the user in the shape auth reads" {
+	Result.Ok(info) := ottimizza.OauthUserInfo.decode(userInfo(8), json.codec()) else {
+		Result.Error(why) { panic why }
+	}
+	relayed := encode(ottimizza.toAuthenticatedUser(info.record), json.codec())
+	assert relayed == "\{\"id\":\"42\",\"displayName\":\"ada\",\"scopes\":[\"*\",\"admin\",\"analyst\",\"leader\"],\"organizationId\":\"7\",\"isAdmin\":false}"
+
+	Result.Ok(read) := auth.AuthenticatedUser.decode(relayed, json.codec()) else {
+		Result.Error(why) { panic why }
+	}
+	assert auth.toUser(read) is auth.User.User
+	assert read.organizationId == "7"
+}
+
+test "only a tech leader is an administrator" {
+	Result.Ok(info) := ottimizza.OauthUserInfo.decode(userInfo(9), json.codec()) else {
+		Result.Error(why) { panic why }
+	}
+	assert auth.toUser(ottimizza.toAuthenticatedUser(info.record)) is auth.User.SysAdmin
+}
+
+test "the relay refuses a request without a token" {
+	response := ottimizza.authenticate(net.HttpRequest("GET", "/auth_relay", [], ""))
+	assert response.status == 401
+	assert response.body == "Unauthorized"
+}
+
+// --- statistics ------------------------------------------------------------
+
+test "the statistics add up" {
+	counter := ottimizza.startStats()
+	assert counts(counter) == ottimizza.Stats.Counts(0, 0, 0)
+
+	ottimizza.hit(counter)
+	ottimizza.hit(counter)
+	ottimizza.missed(counter, 3)
+	ottimizza.missed(counter, 0)
+	ottimizza.saved(counter, 10)
+	assert counts(counter) == ottimizza.Stats.Counts(2, 3, 10)
+}
+
+test "a provided resource is a hit, and saves its bytes when it is delivered" {
+	store := database.openStore(2)
+	counter := ottimizza.startStats()
+	ctx := context(store, counter)
+	alice := auth.User.User("alice", "Alice", ["*"], "7", 0.0)
+	bob := auth.User.User("bob", "Bob", ["*"], "7", 0.0)
+
+	Result.Ok(clusterId) := cluster.joinCluster(store, alice, "10.0.0.1", "conn-alice") else {
+		Result.Error(why) { panic why }
+	}
+	_ := cluster.joinCluster(store, bob, "10.0.0.1", "conn-bob")
+	db := database.shard(store, clusterId)
+	_ := sql.run(db, engine.insertPendingResource("res-1", clusterId, "alice", "resource", time.now()))
+	_ := sql.run(db, engine.insertPendingResource("res-2", clusterId, "carol", "resource", time.now()))
+
+	// `é` is two bytes: what is counted is what crossed the wire.
+	_ := engine.provide(ctx, clusterId, bob, "10.0.0.1", "res-1 \{\"a\":\"é\"}")
+	assert counts(counter) == ottimizza.Stats.Counts(1, 0, 10)
+
+	// Nobody is left to deliver to, but a peer still answered.
+	_ := engine.provide(ctx, clusterId, bob, "10.0.0.1", "res-2 \{}")
+	// Gone already: neither a hit nor a miss.
+	_ := engine.provide(ctx, clusterId, bob, "10.0.0.1", "res-1 \{}")
+	assert counts(counter) == ottimizza.Stats.Counts(2, 0, 10)
+}
+
+// --- /info -----------------------------------------------------------------
+
+test "info reports the users, clusters and cache statistics" {
+	store := database.openStore(2)
+	counter := ottimizza.startStats()
+
+	auth.storeUser(store.users, "token-1", auth.User.User("1", "Ada", ["*"], "7", 0.0))
+	_ := sql.run(database.shard(store, "0-east"), cluster.insertCluster("0-east", "7", "10.0.0.1"))
+	_ := sql.run(database.shard(store, "1-west"), cluster.insertCluster("1-west", "7", "10.0.0.2"))
+	ottimizza.hit(counter)
+	ottimizza.missed(counter, 2)
+	ottimizza.saved(counter, 512)
+
+	response := ottimizza.info(store, counter)
+	assert response.status == 200
+	assert response.body == "\{\"userCount\":1,\"clusterCount\":2,\"bandwidthSaved\":512,\"cacheMissCount\":2,\"cacheHitCount\":1}"
+	assert row(response.headers, "Access-Control-Allow-Origin") == ["Access-Control-Allow-Origin", "*"]
+	assert row(response.headers, "Access-Control-Allow-Methods") == ["Access-Control-Allow-Methods", "GET,HEAD,PUT,PATCH,DELETE,OPTIONS"]
+	assert row(response.headers, "Access-Control-Allow-Headers") == ["Access-Control-Allow-Headers", "*"]
+}

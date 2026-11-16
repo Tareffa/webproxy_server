@@ -1,0 +1,20 @@
+{
+  "README.md": "eb0beb8b14f895bc88e792e36ed8684ed42f8015fb5be395c6e68e2de963cbeb",
+  "healthcheck.sh": "235ca0e82ea4457d2b2560520a555d1f27dfb5404afd379e0fb24a684c20db0e",
+  "src/webproxy_server.gleam": "26dd4f9a5a5dd395f01294011baf3a4be16c17a5d9b013fc51ccd35f28a91f16",
+  "src/webproxy_server/auth.gleam": "f19fe26fe4dedd197a585b3051cb0faf6924dc251f485f4947c8de29b7bbcda8",
+  "src/webproxy_server/cluster.gleam": "2fb76329091f3eb1b12a2478840b45919c0cffd6b6bd7dae957bb34a61a9777c",
+  "src/webproxy_server/engine.gleam": "7f2680cc644ade77800bc6e7c4910626f3dbc223bf034ce824a7891e5f6fcdb0",
+  "src/webproxy_server/environment.gleam": "0ac7ca99eec40b465787afd1ec9b735d7de8ee4b02425d0b038e7ee6f837b277",
+  "src/webproxy_server/intervention.gleam": "2d614aca9ee9b4cc9f3709e9a2dd728a981ea6aa30666a1a205b21eb789e159e",
+  "src/webproxy_server/log.gleam": "419f99dc581d68e24156db9533ee8965e37d8f042bcc6d7a4735a36dcff87f21",
+  "src/webproxy_server/router.gleam": "f2fab1da6b2f8c49a06979ded5f1d6ccbe8951c9e01642a3a2901d32e3177b80",
+  "src/webproxy_server/web.gleam": "93aa39a7cb27f54fe12273408b1027c3dc4d6a22b15fe281b19c23223a9e2936",
+  "src/webproxy_server/ws.gleam": "9ffb2440a67fdc9b8195b33226becaa5df367790f48863885463c151f952556f",
+  "src/webproxy_server_ffi.erl": "c4a0d49a6d32e18e0298ac0d76711b2c9316f82712ec3d71a83b84f277b4af05",
+  "test/webproxy_server/auth_test.gleam": "ee4f847515559100e284b724c84dcdefaab9c51ea9ffc3a7d6ba4b4211fa280d",
+  "test/webproxy_server/cluster_test.gleam": "73bda4477bf29ffb74ba95208583a141fbe69ad5916f6b4c1e29442d6b19b455",
+  "test/webproxy_server/engine_test.gleam": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+  "test/webproxy_server/intervention_test.gleam": "2882dfe332985c3b4d04afa2bac44dd666af9445283c3a7d6389d74e7cf072d0",
+  "test/webproxy_server_test.gleam": "028a6bc98136f2614db7f8c5fc8a0f364d5ca7cca0fda742e570fd00f0072f5b"
+}

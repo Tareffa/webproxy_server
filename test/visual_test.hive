@@ -1,0 +1,161 @@
+import ../src/cluster
+import ../src/database
+import ../src/ottimizza
+import ../src/router
+import ../src/visual
+import ../src/ws
+
+// --- helpers ---------------------------------------------------------------
+
+func key(): Secret<Str> {
+	return bypass("test-anonymization-key")
+}
+
+// Stores a cluster under a readable id, so a test can tell whether any part of
+// it leaks into what is published.
+func insertCluster(store: database.Store, id: Str, organizationId: Str, ipAddress: Str, memberIds: Str[]): void {
+	db := database.shard(store, id)
+	_ := sql.run(db, cluster.insertCluster(id, organizationId, ipAddress))
+	for each memberId in memberIds {
+		_ := sql.run(db, cluster.upsertMember(id, memberId, "conn-{memberId}", "user {memberId}"))
+	}
+}
+
+func sampleClusters(): database.Store {
+	store := database.openStore(2)
+	insertCluster(store, "cl-1", "org-1", "10.0.0.1", ["a", "b", "c"])
+	insertCluster(store, "cl-2", "org-1", "10.0.0.2", ["d"])
+	insertCluster(store, "cl-3", "org-2", "10.0.0.3", ["e", "f"])
+	return store
+}
+
+func sessionsOf(summary: visual.ClusterSummary): Int {
+	return summary.sessions
+}
+
+func idOf(summary: visual.ClusterSummary): Str {
+	return summary.id
+}
+
+func organizationOf(summary: visual.ClusterSummary): Str {
+	return summary.organization
+}
+
+// The anonymized organization of the cluster with `sessions` sessions, which
+// are unique in `sampleClusters`, so tests can tell the clusters apart.
+func organizationWithSessions(summaries: visual.ClusterSummary[], sessions: Int): Str {
+	for each summary in summaries {
+		if summary.sessions == sessions {
+			return summary.organization
+		}
+	}
+	return ""
+}
+
+func contains(text: Str, part: Str): Bool {
+	return indexOf(text, part) is Result.Ok(_)
+}
+
+func leaks(summary: visual.ClusterSummary): Bool {
+	published := "{summary.id} {summary.organization}"
+	return contains(published, "cl-") || contains(published, "org-") || contains(published, "10.0.0.")
+}
+
+func context(store: database.Store): ws.Context {
+	return ws.Context(store, ws.startRegistry(), "https://auth.example.com", [], false, key(), ottimizza.startStats())
+}
+
+// The shape of `/info/visual/data`, read back.
+type Published {
+	sessions: Int
+}
+
+type PublishedSnapshot {
+	sessionCount: Int
+	clusters: Published[dyn]
+}
+
+// --- summarize -------------------------------------------------------------
+
+test "summarize counts sessions" {
+	sessions := sort(map(visual.summarize(sampleClusters(), key()), sessionsOf))
+	assert sessions == [1, 2, 3]
+}
+
+test "summarize empty" {
+	assert len(visual.summarize(database.openStore(2), key())) == 0
+}
+
+test "summarize groups by organization" {
+	summaries := visual.summarize(sampleClusters(), key())
+
+	// cl-1 (3 sessions) and cl-2 (1 session) share org-1; cl-3 (2) is org-2.
+	assert organizationWithSessions(summaries, 3) == organizationWithSessions(summaries, 1)
+	assert organizationWithSessions(summaries, 3) != organizationWithSessions(summaries, 2)
+	assert organizationWithSessions(summaries, 3) != ""
+}
+
+test "summarize hides identifiers" {
+	summaries := visual.summarize(sampleClusters(), key())
+	assert len(filter(summaries, leaks)) == 0
+
+	// Cluster and organization ids are hashed in separate domains, so a cluster
+	// id never doubles as an organization id.
+	organizations := map(summaries, organizationOf)
+	for each id in map(summaries, idOf) {
+		assert indexOf(organizations, id) is Result.Error(_)
+	}
+}
+
+test "summarize is stable per key" {
+	store := sampleClusters()
+
+	ids := sort(map(visual.summarize(store, key()), idOf))
+	assert ids == sort(map(visual.summarize(store, key()), idOf))
+	assert ids != sort(map(visual.summarize(store, bypass("another-key")), idOf))
+}
+
+// --- endpoints -------------------------------------------------------------
+
+test "data endpoint" {
+	response := visual.data(sampleClusters(), key())
+	assert response.status == 200
+	assert row(response.headers, "Content-Type") == ["Content-Type", "application/json"]
+	assert !contains(response.body, "10.0.0.")
+
+	Result.Ok(published) := PublishedSnapshot.decode(response.body, json.codec()) else {
+		Result.Error(why) { panic why }
+	}
+	assert published.sessionCount == 6
+	assert sort(map(published.clusters, publishedSessions)) == [1, 2, 3]
+}
+
+func publishedSessions(published: Published): Int {
+	return published.sessions
+}
+
+test "page endpoint" {
+	response := visual.page()
+	assert response.status == 200
+	assert row(response.headers, "Content-Type") == ["Content-Type", "text/html; charset=utf-8"]
+
+	// The page is served intact, including its non-ASCII text, and polls the
+	// data endpoint relative to its own path.
+	html := response.body
+	assert html is "<!doctype html>{_rest}"
+	assert contains(html, "<title>WebProxy Clusters</title>")
+	assert contains(html, "Connecting…")
+	assert contains(html, "location.pathname.replace(/\\/+$/, '') + '/data'")
+	assert contains(html, "<a href=\"https://rhm.dev\" target=\"_blank\" rel=\"noopener\">Rodrigo Heinzen de Moraes</a>")
+	assert html is "{_page}</html>"
+}
+
+test "the router serves both endpoints" {
+	ctx := context(sampleClusters())
+	assert router.handleRequest(ctx, net.HttpRequest("GET", "/info/visual", [], "")).body == visual.page().body
+	// The page fetches `<its own path>/data`, so it works with a trailing slash.
+	assert router.handleRequest(ctx, net.HttpRequest("GET", "/info/visual/", [], "")).status == 200
+	data := router.handleRequest(ctx, net.HttpRequest("GET", "/info/visual/data", [], ""))
+	assert data.status == 200
+	assert contains(data.body, "\"sessionCount\":6")
+}

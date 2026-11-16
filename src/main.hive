@@ -1,0 +1,60 @@
+import ./auth
+import ./database
+import ./engine
+import ./environment
+import ./ottimizza
+import ./router
+import ./ws
+
+proc main(): void {
+	echo "Starting server..."
+
+	administratorIps := environment.authorizedAdministratorIps()
+	warnAboutAuthorizedAdministratorIps(administratorIps)
+
+	// ponytail: sixteen databases for the clusters, one for each first digit a
+	// cluster id can have; see `database.shard` before asking for more.
+	store := database.openStore(16)
+	stats := ottimizza.startStats()
+	ctx := ws.Context(store, ws.startRegistry(), environment.authenticationUrl(), administratorIps, environment.useNativeConnectionIp(), anonymizationKey(), stats)
+
+	async startGarbageCollector(store.users)
+	async startPendingResourceSweeper(store, stats)
+
+	port := environment.port()
+	echo "Server started at port {port}"
+	net.httpWsServe(port, router.handleRequest(ctx, _), router.handleConnection(ctx, _))
+}
+
+// A fresh random key for every boot, so the ids `/info/visual` publishes stay
+// stable while the server runs and change on every restart.
+func anonymizationKey(): Secret<Str> {
+	generated := crypto.randomSecret(32)
+	if generated is Result.Ok(key) {
+		return key
+	} else if generated is Result.Error(why) {
+		panic why
+	}
+}
+
+proc startGarbageCollector(db: sql.SqlConnection): void {
+	for ; true; {
+		task.sleep(3_600_000)
+		auth.deleteOldUsers(db)
+	}
+}
+
+proc startPendingResourceSweeper(store: database.Store, stats: Address<ottimizza.Stats>): void {
+	for ; true; {
+		task.sleep(5_000)
+		ottimizza.missed(stats, engine.removeExpiredPendingResources(store))
+	}
+}
+
+// Emits a warning at boot when `AUTHORIZED_ADMINISTRATOR_IPS` contains the
+// wildcard `"*"`, which allows any IP address to upgrade to intervention mode.
+func warnAboutAuthorizedAdministratorIps(administratorIps: Str[dyn]): void {
+	if indexOf(administratorIps, "*") is Result.Ok(_) {
+		term.status("WARNING: AUTHORIZED_ADMINISTRATOR_IPS contains \"*\", so connections from any IP address are allowed to upgrade to intervention mode. This may be dangerous.")
+	}
+}

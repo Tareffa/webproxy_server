@@ -1,0 +1,97 @@
+// The SQLite schema behind every table the server keeps.
+
+query createSchema(): void {
+	BEGIN;
+
+	CREATE TABLE users (
+		token TEXT PRIMARY KEY,
+		id TEXT NOT NULL,
+		display_name TEXT NOT NULL,
+		scopes TEXT NOT NULL,
+		organization_id TEXT NOT NULL,
+		created_at REAL NOT NULL
+	);
+	CREATE INDEX users_by_display_name ON users (display_name);
+
+	CREATE TABLE clusters (
+		id TEXT PRIMARY KEY,
+		organization_id TEXT NOT NULL,
+		ip_address TEXT NOT NULL
+	);
+
+	-- A cluster's members, one live connection per user id. The display name
+	-- is the user's as they joined, so a cluster never has to look a user up.
+	CREATE TABLE members (
+		cluster_id TEXT NOT NULL,
+		user_id TEXT NOT NULL,
+		conn_id TEXT NOT NULL,
+		display_name TEXT NOT NULL,
+		PRIMARY KEY (cluster_id, user_id)
+	);
+
+	CREATE TABLE pending_resources (
+		id TEXT PRIMARY KEY,
+		cluster_id TEXT NOT NULL,
+		user_id TEXT NOT NULL,
+		resource_name TEXT NOT NULL,
+		created_at INTEGER NOT NULL -- Unix milliseconds
+	);
+
+	COMMIT;
+}
+
+// Where the rows live. SQLite runs one statement at a time in a database, and
+// two clusters never share a row, so the clusters are spread over several
+// databases and wait only on the ones they share theirs with. A cluster's row,
+// its members and their pending resources are all in the same one; the users
+// are in a database of their own.
+type Store {
+	users: sql.SqlConnection
+	clusters: sql.SqlConnection[dyn]
+}
+
+// Opens the users' database and `shards` more for the clusters.
+func openStore(shards: Int): Store {
+	mut sql.SqlConnection[dyn] clusters = []
+	for i := 0; i < shards; i++ {
+		append(clusters, open())
+	}
+	return Store(open(), clusters)
+}
+
+// The database a cluster is in, picked by the first digit of its id. The id is
+// a hash, which is what spreads the clusters evenly.
+// ponytail: one hex digit, so no more than sixteen databases are ever used;
+// read a second digit if a machine has more cores than that to give SQLite.
+func shard(store: Store, clusterId: Str): sql.SqlConnection {
+	clusters := store.clusters
+	if len(clusters) == 0 {
+		panic "The store was opened without a database for its clusters."
+	}
+	mut digit := 0
+	if clusterId bounds 0 && indexOf("0123456789abcdef", clusterId[0]) is Result.Ok(found) {
+		digit = found
+	}
+	at := digit % len(clusters)
+	if clusters bounds at {
+		return clusters[at]
+	}
+	panic "The store was opened without a database for its clusters."
+}
+
+// Opens a fresh in-memory database holding every table. An in-memory database
+// belongs to a connection, so the pool's connections share one through a
+// shared cache, and the random name gives every call (and every test) a
+// database of its own. The idle connection the pool keeps is what keeps the
+// database alive.
+func open(): sql.SqlConnection {
+	opened := sql.pool(sql.DatabaseDriver.SQLite(), "file:{crypto.randomHex(8)}?mode=memory&cache=shared", 8, 1)
+	if opened is Result.Ok(db) {
+		if sql.run(db, createSchema()) is Result.Error(why) {
+			panic why
+		}
+		return db
+	} else if opened is Result.Error(why) {
+		panic why
+	}
+}

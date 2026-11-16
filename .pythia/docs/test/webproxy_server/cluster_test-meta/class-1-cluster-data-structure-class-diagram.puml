@@ -1,0 +1,31 @@
+@startuml
+title Cluster Data Structure Class Diagram
+
+class clusters_table {
+  +new_clusters_table(): clusters_table
+  +join_cluster(user: User, ip_address: String, outbound: Subject): Result[String]
+  +leave_cluster(table: clusters_table, cluster_id: String, user_id: String): Result[None]
+  +get_connected_peers(table: clusters_table, cluster_id: String, user_id: String): Dict[String, String]
+}
+
+class User {
+  -id: String
+  -display_name: String
+  -scopes: List[String]
+  -organization_id: String
+  -created_at: Float
+  +User(id: String, display_name: String, scopes: List[String], organization_id: String, created_at: Float): User
+}
+
+class Subject {
+  -listeners: List[Listener]
+  +new_subject(): Subject
+  +subscribe(listener: Listener): Void
+  +publish(event: Event): Void
+}
+
+clusters_table --> User : join_cluster
+clusters_table --> clusters_table : leave_cluster
+clusters_table --> clusters_table : get_connected_peers
+
+@enduml
